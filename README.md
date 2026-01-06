@@ -71,6 +71,25 @@ Planned Resolution
 The following recovery actions are planned:
 
 Shutdown and restart of WSL (wsl --shutdown)
+## Known Issue: Zephyr SDK toolchain crash in WSL (Internal Compiler Error)
+
+During the initial build stage on WSL2 (Ubuntu), the build fails before compiling the application code.
+CMake is unable to validate the toolchain because the Zephyr SDK compiler crashes while compiling a dummy C/C++ file.
+
+Observed errors in `build/CMakeFiles/CMakeConfigureLog.yaml`:
+- `arm-zephyr-eabi-g++: error: unrecognized command-line option '--target=arm-arm-none-eabi'`
+- `arm-zephyr-eabi-gcc: internal compiler error: Segmentation fault ... terminated program cc1`
+- `arm-zephyr-eabi-g++: internal compiler error: Segmentation fault ... terminated program cc1plus`
+
+Impact:
+- `west build` cannot proceed (toolchain validation fails).
+- This is an environment/toolchain stability issue, not application source code logic.
+
+Planned mitigation:
+- Re-extract/reinstall Zephyr SDK and rerun a minimal compiler self-test.
+- Clear Zephyr cache (`~/.cache/zephyr`) and rebuild.
+- If persistent, migrate to a clean WSL distro or native Linux environment.
+
 
 If the issue persists, full reinstallation of the WSL Ubuntu distribution
 
