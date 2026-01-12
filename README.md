@@ -96,3 +96,70 @@ If the issue persists, full reinstallation of the WSL Ubuntu distribution
 Restoration of the project repository from GitHub after environment recovery
 
 Note: Since all project source code is version-controlled in GitHub, no source code loss is expected.
+## Known Issue: Zephyr SDK toolchain crash on WSL2 (ICE / toolchain validation failure)
+
+### Summary
+On WSL2 (Ubuntu), `west build` may fail **before any application code is compiled**.  
+CMake cannot validate the toolchain because the Zephyr SDK compiler crashes while compiling a **dummy C/C++ try-compile** during the initial configuration stage.
+
+This is a **host environment / toolchain stability** issue (e.g., WSL2 storage/resource pressure, corrupted SDK extraction), not an application logic problem.
+
+---
+
+### Symptoms / Evidence
+Build stops during compiler identification / try-compile (CMake toolchain validation).  
+`build/CMakeFiles/CMakeConfigureLog.yaml` may contain errors such as:
+
+```text
+arm-zephyr-eabi-g++: error: unrecognized command-line option '--target=arm-arm-none-eabi'
+arm-zephyr-eabi-gcc: internal compiler error: Segmentation fault ... terminated program cc1
+arm-zephyr-eabi-g++: internal compiler error: Segmentation fault ... terminated program cc1plus
+Impact
+west build cannot proceed (toolchain validation fails).
+
+Fails even before compiling project source → indicates SDK/host instability.
+
+Quick Verification (minimal compiler self-test)
+If the toolchain is healthy, compiling a trivial file should succeed:
+
+sh
+코드 복사
+cat > /tmp/t.c <<'EOF'
+int main(void){return 0;}
+EOF
+
+$ZEPHYR_SDK_INSTALL_DIR/arm-zephyr-eabi/bin/arm-zephyr-eabi-gcc \
+  -c /tmp/t.c -o /tmp/t.o
+If this fails (ICE/segfault), treat it as an SDK/WSL environment problem.
+
+Mitigation / Recovery Steps
+Re-extract / reinstall Zephyr SDK
+(corruption is common when disk is tight or IO is unstable)
+
+Clear Zephyr cache + rebuild
+
+sh
+코드 복사
+rm -rf ~/.cache/zephyr
+rm -rf build
+west build -p auto -b nrf52840dk/nrf52840
+Check Windows host disk space
+Recommended: keep 20GB+ free to avoid WSL2 virtual disk pressure.
+
+If the problem persists:
+
+migrate to a clean WSL distro instance, or
+
+use a native Linux environment
+
+Worst case:
+
+full reinstall of the WSL Ubuntu distribution and re-setup Zephyr
+
+Repository Safety Note
+All project source is version-controlled in GitHub, so no source code loss is expected.
+After environment recovery, restore the workspace by re-cloning the repository:
+
+sh
+코드 복사
+git clone https://github.com/minoverse/BLE-zephyr-hearable-system.git
