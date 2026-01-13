@@ -1,0 +1,17 @@
+/ {
+    aliases {
+        imu0 = &lsm6dso0;
+    };
+};
+
+&i2c0 {
+    status = "okay";
+    clock-frequency = <100000>;
+
+    lsm6dso0: lsm6dso@6a {
+        compatible = "st,lsm6dso";
+        reg = <0x6a>;
+        status = "okay";
+    };
+};
+
