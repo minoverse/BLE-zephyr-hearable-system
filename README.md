@@ -122,8 +122,7 @@ Fails even before compiling project source → indicates SDK/host instability.
 Quick Verification (minimal compiler self-test)
 If the toolchain is healthy, compiling a trivial file should succeed:
 
-sh
-코드 복사
+
 cat > /tmp/t.c <<'EOF'
 int main(void){return 0;}
 EOF
@@ -138,8 +137,7 @@ Re-extract / reinstall Zephyr SDK
 
 Clear Zephyr cache + rebuild
 
-sh
-코드 복사
+
 rm -rf ~/.cache/zephyr
 rm -rf build
 west build -p auto -b nrf52840dk/nrf52840
@@ -160,6 +158,5 @@ Repository Safety Note
 All project source is version-controlled in GitHub, so no source code loss is expected.
 After environment recovery, restore the workspace by re-cloning the repository:
 
-sh
-코드 복사
+
 git clone https://github.com/minoverse/BLE-zephyr-hearable-system.git
