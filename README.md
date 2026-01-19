@@ -24,11 +24,11 @@ IMU-based gesture detection with a custom BLE GATT service, low-power design, an
 
 ### Gesture Detection Demo
 
-![Gesture Demo](docs/gesture_demo.gif)
+![Gesture Demo](docs/20260119_175801.jpg)
 
 or
 
- [Watch demo video](docs/gesture_demo.mp4)
+ [Watch demo video](docs/20260119_175923.mp4)
 
 **Detected gestures**
 - LEFT (X-axis acceleration)
