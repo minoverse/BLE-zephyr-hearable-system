@@ -1,12 +1,10 @@
 / {
-    aliases {
-        imu0 = &lsm6dso0;
-    };
+    aliases { imu0 = &lsm6dso0; };
 };
 
 &i2c0 {
     status = "okay";
-    clock-frequency = <100000>;
+    clock-frequency = <I2C_BITRATE_STANDARD>;
 
     lsm6dso0: lsm6dso@6a {
         compatible = "st,lsm6dso";

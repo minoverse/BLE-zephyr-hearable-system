@@ -1,0 +1,317 @@
+/*
+ * Clean test app:
+ * - Custom Vendor Service (UUID ...abcdef0)
+ * - Characteristic ...abcdef1 (Indicate)
+ * - Sends 1Hz dummy indication ONLY after phone enables CCC Indications
+ * - I2C scan + optional LSM6DSO read (won't compile-crash if node missing)
+ */
+
+#include <zephyr/kernel.h>
+#include <zephyr/types.h>
+#include <stddef.h>
+#include <string.h>
+
+#include <zephyr/sys/printk.h>
+#include <zephyr/sys/byteorder.h>
+
+#include <zephyr/device.h>
+#include <zephyr/drivers/i2c.h>
+#include <zephyr/drivers/sensor.h>
+
+#include <zephyr/logging/log.h>
+
+#include <zephyr/bluetooth/bluetooth.h>
+#include <zephyr/bluetooth/conn.h>
+#include <zephyr/bluetooth/uuid.h>
+#include <zephyr/bluetooth/gatt.h>
+
+#if IS_ENABLED(CONFIG_SETTINGS)
+#include <zephyr/settings/settings.h>
+#endif
+
+LOG_MODULE_REGISTER(main, LOG_LEVEL_INF);
+
+/* =========================
+ *  UUIDs
+ * ========================= */
+#define BT_UUID_CUSTOM_SERVICE_VAL \
+	BT_UUID_128_ENCODE(0x12345678, 0x1234, 0x5678, 0x1234, 0x56789abcdef0)
+
+static const struct bt_uuid_128 vnd_uuid = BT_UUID_INIT_128(BT_UUID_CUSTOM_SERVICE_VAL);
+
+static const struct bt_uuid_128 vnd_enc_uuid = BT_UUID_INIT_128(
+	BT_UUID_128_ENCODE(0x12345678, 0x1234, 0x5678, 0x1234, 0x56789abcdef1));
+
+/* =========================
+ *  GATT data + handlers
+ * ========================= */
+#define VND_MAX_LEN 20
+static uint8_t vnd_value[VND_MAX_LEN + 1] = { 'V', 'e', 'n', 'd', 'o', 'r', 0 };
+
+static ssize_t read_vnd(struct bt_conn *conn, const struct bt_gatt_attr *attr,
+			void *buf, uint16_t len, uint16_t offset)
+{
+	const uint8_t *value = attr->user_data;
+	size_t vlen = strlen((const char *)value);
+
+	return bt_gatt_attr_read(conn, attr, buf, len, offset, value, vlen);
+}
+
+static ssize_t write_vnd(struct bt_conn *conn, const struct bt_gatt_attr *attr,
+			 const void *buf, uint16_t len, uint16_t offset,
+			 uint8_t flags)
+{
+	uint8_t *value = attr->user_data;
+
+	if (offset + len > VND_MAX_LEN) {
+		return BT_GATT_ERR(BT_ATT_ERR_INVALID_OFFSET);
+	}
+
+	memcpy(value + offset, buf, len);
+	value[offset + len] = 0;
+
+	return len;
+}
+
+/* CCC state (set when phone enables Indication) */
+static uint8_t simulate_vnd;
+
+/* Indication runtime state */
+static uint8_t indicating;
+static struct bt_gatt_indicate_params ind_params;
+
+/* We'll resolve the "value attribute" by UUID at runtime */
+static struct bt_gatt_attr *vnd_ind_attr;
+
+/* When CCC changes */
+static void vnd_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value)
+{
+	simulate_vnd = (value == BT_GATT_CCC_INDICATE) ? 1 : 0;
+	LOG_INF("CCC Indicate %s", simulate_vnd ? "ENABLED" : "DISABLED");
+}
+
+static void indicate_cb(struct bt_conn *conn,
+			struct bt_gatt_indicate_params *params, uint8_t err)
+{
+	if (err) {
+		LOG_WRN("Indication FAIL (err=%u)", err);
+	} else {
+		LOG_INF("Indication ACK");
+	}
+	indicating = 0U;
+}
+
+static void indicate_destroy(struct bt_gatt_indicate_params *params)
+{
+	/* called after indication completes */
+	indicating = 0U;
+}
+
+/* =========================
+ *  Vendor Service
+ * ========================= */
+BT_GATT_SERVICE_DEFINE(vnd_svc,
+	BT_GATT_PRIMARY_SERVICE(&vnd_uuid),
+
+	BT_GATT_CHARACTERISTIC(&vnd_enc_uuid.uuid,
+			       BT_GATT_CHRC_READ | BT_GATT_CHRC_WRITE | BT_GATT_CHRC_INDICATE,
+			       BT_GATT_PERM_READ | BT_GATT_PERM_WRITE,
+			       read_vnd, write_vnd, vnd_value),
+
+	BT_GATT_CCC(vnd_ccc_cfg_changed,
+		    BT_GATT_PERM_READ | BT_GATT_PERM_WRITE)
+);
+
+/* =========================
+ *  1Hz Indication test (dummy)
+ * ========================= */
+static void vnd_indicate_work_handler(struct k_work *work);
+K_WORK_DELAYABLE_DEFINE(vnd_indicate_work, vnd_indicate_work_handler);
+
+static void vnd_indicate_work_handler(struct k_work *work)
+{
+	static uint8_t cnt;
+	static uint8_t data[5]; /* stable buffer */
+	uint32_t ts;
+
+	/* Reschedule first (so even early returns keep 1Hz rhythm) */
+	k_work_schedule(&vnd_indicate_work, K_SECONDS(1));
+
+	/* Only send after phone enabled CCC Indicate */
+	if (!simulate_vnd) {
+		return;
+	}
+
+	/* Need the value attribute resolved */
+	if (!vnd_ind_attr) {
+		return;
+	}
+
+	/* Skip if previous indication not ACKed yet */
+	if (indicating) {
+		return;
+	}
+
+	ts = k_uptime_get_32();
+	data[0] = cnt++;                /* dummy gesture type */
+	sys_put_le32(ts, &data[1]);     /* dummy timestamp */
+
+	memset(&ind_params, 0, sizeof(ind_params));
+	ind_params.attr = vnd_ind_attr;
+	ind_params.func = indicate_cb;
+	ind_params.destroy = indicate_destroy;
+	ind_params.data = data;
+	ind_params.len  = sizeof(data);
+
+	int err = bt_gatt_indicate(NULL, &ind_params);
+	if (err) {
+		LOG_WRN("bt_gatt_indicate err=%d", err);
+		return;
+	}
+
+	indicating = 1U;
+}
+
+/* =========================
+ *  Advertising
+ * ========================= */
+static const struct bt_data ad[] = {
+	BT_DATA_BYTES(BT_DATA_FLAGS, (BT_LE_AD_GENERAL | BT_LE_AD_NO_BREDR)),
+	BT_DATA_BYTES(BT_DATA_UUID128_ALL, BT_UUID_CUSTOM_SERVICE_VAL),
+};
+
+static const struct bt_data sd[] = {
+	BT_DATA(BT_DATA_NAME_COMPLETE, CONFIG_BT_DEVICE_NAME,
+		sizeof(CONFIG_BT_DEVICE_NAME) - 1),
+};
+
+/* =========================
+ *  I2C scan
+ * ========================= */
+static void i2c_scan_bus(void)
+{
+	const struct device *i2c = DEVICE_DT_GET(DT_NODELABEL(i2c0));
+
+	if (!device_is_ready(i2c)) {
+		LOG_ERR("I2C0 not ready");
+		return;
+	}
+
+	LOG_INF("I2C scan start (i2c0)...");
+	for (uint8_t addr = 0x03; addr <= 0x77; addr++) {
+		struct i2c_msg msg = {
+			.buf = NULL,
+			.len = 0,
+			.flags = I2C_MSG_WRITE | I2C_MSG_STOP,
+		};
+
+		if (i2c_transfer(i2c, &msg, 1, addr) == 0) {
+			LOG_INF("  Found device at 0x%02X", addr);
+		}
+	}
+	LOG_INF("I2C scan done.");
+}
+
+/* =========================
+ *  Optional: LSM6DSO read (only if devicetree has it)
+ * ========================= */
+#if DT_HAS_COMPAT_STATUS_OKAY(st_lsm6dso)
+static void imu_thread(void)
+{
+	const struct device *imu = DEVICE_DT_GET_ONE(st_lsm6dso);
+
+	if (!device_is_ready(imu)) {
+		LOG_ERR("LSM6DSO node exists but device not ready");
+		return;
+	}
+
+	LOG_INF("LSM6DSO ready! Reading accel/gyro...");
+
+	while (1) {
+		struct sensor_value acc[3];
+		struct sensor_value gyr[3];
+
+		int ret = sensor_sample_fetch(imu);
+		if (ret) {
+			LOG_WRN("sensor_sample_fetch failed: %d", ret);
+			k_msleep(500);
+			continue;
+		}
+
+		sensor_channel_get(imu, SENSOR_CHAN_ACCEL_XYZ, acc);
+		sensor_channel_get(imu, SENSOR_CHAN_GYRO_XYZ, gyr);
+
+		LOG_INF("ACC: x=%d.%06d y=%d.%06d z=%d.%06d",
+			acc[0].val1, acc[0].val2,
+			acc[1].val1, acc[1].val2,
+			acc[2].val1, acc[2].val2);
+
+		LOG_INF("GYR: x=%d.%06d y=%d.%06d z=%d.%06d",
+			gyr[0].val1, gyr[0].val2,
+			gyr[1].val1, gyr[1].val2,
+			gyr[2].val1, gyr[2].val2);
+
+		k_msleep(200);
+	}
+}
+#endif
+
+static void bt_ready(void)
+{
+	int err = bt_enable(NULL);
+	if (err) {
+		LOG_ERR("Bluetooth init failed (err %d)", err);
+		return;
+	}
+
+#if IS_ENABLED(CONFIG_SETTINGS)
+	settings_load();
+#endif
+
+	err = bt_le_adv_start(BT_LE_ADV_CONN_FAST_1, ad, ARRAY_SIZE(ad), sd, ARRAY_SIZE(sd));
+	if (err) {
+		LOG_ERR("Advertising failed to start (err %d)", err);
+		return;
+	}
+
+	LOG_INF("Advertising started");
+}
+
+int main(void)
+{
+	LOG_INF("Boot");
+
+	/* 0) I2C scan (non-blocking, one shot) */
+	i2c_scan_bus();
+
+	/* 1) BLE init + advertising */
+	bt_ready();
+
+	/* 2) Resolve characteristic VALUE attribute by UUID (abcdef1) */
+	vnd_ind_attr = bt_gatt_find_by_uuid(vnd_svc.attrs, vnd_svc.attr_count, &vnd_enc_uuid.uuid);
+	if (!vnd_ind_attr) {
+		LOG_WRN("Could not find abcdef1 attribute by UUID");
+	} else {
+		LOG_INF("Found abcdef1 value attribute");
+	}
+
+	/* 3) Start 1Hz indication work (it will only send after CCC enabled) */
+	k_work_schedule(&vnd_indicate_work, K_SECONDS(1));
+
+	/* 4) Optional IMU thread (only if overlay correctly provides st,lsm6dso node) */
+#if DT_HAS_COMPAT_STATUS_OKAY(st_lsm6dso)
+	k_thread_start(k_thread_create(&(struct k_thread){0},
+				       (k_thread_stack_t[1024]){0},
+				       1024,
+				       (k_thread_entry_t)imu_thread,
+				       NULL, NULL, NULL,
+				       7, 0, K_NO_WAIT));
+#else
+	LOG_INF("LSM6DSO devicetree node not found yet (overlay not applied or wrong compatible).");
+#endif
+
+	/* 5) Main loop */
+	while (1) {
+		k_sleep(K_SECONDS(5));
+	}
+}

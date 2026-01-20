@@ -1,159 +1,154 @@
-/* main.c - Application main entry point */
-
 /*
- * Copyright (c) 2015-2016 Intel Corporation
+ * Combined test main.c:
+ * - BLE Vendor service (abcdef1) Indication (only when CCC enabled)
+ * - LSM6DSO: IMU thread -> sample_queue
+ * - Gesture thread -> state-based detect + debounce -> gesture_queue
  *
- * SPDX-License-Identifier: Apache-2.0
+ * Fixes:
+ * - NO ABS macro usage (uses i16_abs)
+ * - Safe write_vnd (no void* arithmetic)
  */
 
-#include <zephyr/types.h>
-#include <stddef.h>
-#include <string.h>
-#include <errno.h>
-#include <zephyr/sys/printk.h>
-#include <zephyr/sys/byteorder.h>
 #include <zephyr/kernel.h>
+#include <zephyr/logging/log.h>
+#include <zephyr/sys/byteorder.h>
+#include <zephyr/sys/util.h>
 
+#include <zephyr/device.h>
+#include <zephyr/drivers/sensor.h>
 #include <zephyr/settings/settings.h>
 
 #include <zephyr/bluetooth/bluetooth.h>
-#include <zephyr/bluetooth/hci.h>
-#include <zephyr/bluetooth/conn.h>
 #include <zephyr/bluetooth/uuid.h>
 #include <zephyr/bluetooth/gatt.h>
-#include <zephyr/bluetooth/services/bas.h>
-#include <zephyr/bluetooth/services/cts.h>
-#include <zephyr/bluetooth/services/hrs.h>
-#include <zephyr/bluetooth/services/ias.h>
 
-#include <zephyr/device.h>
-#include <zephyr/drivers/i2c.h>
-#include <zephyr/drivers/sensor.h>
-#include <zephyr/logging/log.h>
+LOG_MODULE_REGISTER(main, LOG_LEVEL_INF);
 
-/* Custom Service Variables */
-#define BT_UUID_CUSTOM_SERVICE_VAL \
-	BT_UUID_128_ENCODE(0x12345678, 0x1234, 0x5678, 0x1234, 0x56789abcdef0)
+static inline int16_t i16_abs(int16_t x) { return (x < 0) ? (int16_t)-x : x; }
 
-static const struct bt_uuid_128 vnd_uuid = BT_UUID_INIT_128(
-	BT_UUID_CUSTOM_SERVICE_VAL);
+/* ================= IMU sample + queue ================= */
+struct imu_sample {
+	int16_t accel_x, accel_y, accel_z;
+	int16_t gyro_x,  gyro_y,  gyro_z;
+	uint32_t timestamp;
+};
 
-static const struct bt_uuid_128 vnd_enc_uuid = BT_UUID_INIT_128(
-	BT_UUID_128_ENCODE(0x12345678, 0x1234, 0x5678, 0x1234, 0x56789abcdef1));
+#define SAMPLE_QUEUE_SIZE 32
+K_MSGQ_DEFINE(sample_queue, sizeof(struct imu_sample), SAMPLE_QUEUE_SIZE, 4);
 
-static const struct bt_uuid_128 vnd_auth_uuid = BT_UUID_INIT_128(
-	BT_UUID_128_ENCODE(0x12345678, 0x1234, 0x5678, 0x1234, 0x56789abcdef2));
-
-#define VND_MAX_LEN 20
-#define BT_HR_HEARTRATE_DEFAULT_MIN 90U
-#define BT_HR_HEARTRATE_DEFAULT_MAX 160U
-
-static uint8_t vnd_value[VND_MAX_LEN + 1] = { 'V', 'e', 'n', 'd', 'o', 'r'};
-static uint8_t vnd_auth_value[VND_MAX_LEN + 1] = { 'V', 'e', 'n', 'd', 'o', 'r'};
-static uint8_t vnd_wwr_value[VND_MAX_LEN + 1] = { 'V', 'e', 'n', 'd', 'o', 'r' };
-
-static ssize_t read_vnd(struct bt_conn *conn, const struct bt_gatt_attr *attr,
-			void *buf, uint16_t len, uint16_t offset)
+/* sensor_value -> int16 (milli scaling) */
+static inline int16_t sv_to_i16_milli(struct sensor_value v)
 {
-	const char *value = attr->user_data;
-
-	return bt_gatt_attr_read(conn, attr, buf, len, offset, value,
-				 strlen(value));
+	int32_t x = (int32_t)v.val1 * 1000 + (int32_t)(v.val2 / 1000);
+	if (x > INT16_MAX) x = INT16_MAX;
+	if (x < INT16_MIN) x = INT16_MIN;
+	return (int16_t)x;
 }
 
-static ssize_t write_vnd(struct bt_conn *conn, const struct bt_gatt_attr *attr,
-			 const void *buf, uint16_t len, uint16_t offset,
-			 uint8_t flags)
-{
-	uint8_t *value = attr->user_data;
+/* ================= Gesture ================= */
+enum gesture_type {
+	GESTURE_NONE  = 0,
+	GESTURE_NOD   = 1,
+	GESTURE_LEFT  = 2,
+	GESTURE_RIGHT = 3,
+};
 
-	if (offset + len > VND_MAX_LEN) {
-		return BT_GATT_ERR(BT_ATT_ERR_INVALID_OFFSET);
+struct gesture_event {
+	uint8_t type;
+	uint32_t timestamp;
+};
+
+#define GESTURE_QUEUE_SIZE 16
+K_MSGQ_DEFINE(gesture_queue, sizeof(struct gesture_event), GESTURE_QUEUE_SIZE, 4);
+
+/* tuning */
+#define TH_X        2500
+#define TH_Y        2500
+#define DEADZONE    1200
+#define STABLE_N    3
+#define COOLDOWN_MS 700
+
+static enum gesture_type detect_gesture_state(const struct imu_sample *s, uint32_t now_ms)
+{
+	static enum gesture_type last_fired = GESTURE_NONE;
+	static uint32_t last_fire_time = 0;
+
+	static enum gesture_type candidate = GESTURE_NONE;
+	static uint8_t stable_cnt = 0;
+
+	if (now_ms - last_fire_time < COOLDOWN_MS) {
+		return GESTURE_NONE;
 	}
 
-	memcpy(value + offset, buf, len);
-	value[offset + len] = 0;
+	if (last_fired != GESTURE_NONE) {
+		if (i16_abs(s->accel_x) < DEADZONE && i16_abs(s->accel_y) < DEADZONE) {
+			last_fired = GESTURE_NONE;
+		} else {
+			return GESTURE_NONE;
+		}
+	}
 
-	return len;
+	enum gesture_type g = GESTURE_NONE;
+	if (s->accel_x > TH_X)        g = GESTURE_RIGHT;
+	else if (s->accel_x < -TH_X)  g = GESTURE_LEFT;
+	else if (s->accel_y > TH_Y)   g = GESTURE_NOD;
+
+	if (g == GESTURE_NONE) {
+		candidate = GESTURE_NONE;
+		stable_cnt = 0;
+		return GESTURE_NONE;
+	}
+
+	if (g == candidate) {
+		stable_cnt++;
+	} else {
+		candidate = g;
+		stable_cnt = 1;
+	}
+
+	if (stable_cnt >= STABLE_N) {
+		last_fire_time = now_ms;
+		last_fired = g;
+		candidate = GESTURE_NONE;
+		stable_cnt = 0;
+		return g;
+	}
+
+	return GESTURE_NONE;
 }
+
+/* ================= BLE Vendor Service ================= */
+#define BT_UUID_CUSTOM_SERVICE_VAL \
+	BT_UUID_128_ENCODE(0x12345678,0x1234,0x5678,0x1234,0x56789abcdef0)
+
+static const struct bt_uuid_128 vnd_uuid =
+	BT_UUID_INIT_128(BT_UUID_CUSTOM_SERVICE_VAL);
+
+static const struct bt_uuid_128 vnd_ind_uuid =
+	BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x12345678,0x1234,0x5678,0x1234,0x56789abcdef1));
+
+#define VND_MAX_LEN 20
+static uint8_t vnd_value[VND_MAX_LEN + 1] = { 'V','e','n','d','o','r',0 };
 
 static uint8_t simulate_vnd;
 static uint8_t indicating;
 static struct bt_gatt_indicate_params ind_params;
+static uint8_t ind_data[5];
 
-static void vnd_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value)
+static ssize_t read_vnd(struct bt_conn *c, const struct bt_gatt_attr *attr,
+			void *buf, uint16_t len, uint16_t offset)
 {
-	simulate_vnd = (value == BT_GATT_CCC_INDICATE) ? 1 : 0;
+	const char *value = (const char *)attr->user_data;
+	return bt_gatt_attr_read(c, attr, buf, len, offset, value, strlen(value));
 }
 
-static void indicate_cb(struct bt_conn *conn,
-			struct bt_gatt_indicate_params *params, uint8_t err)
+static ssize_t write_vnd(struct bt_conn *c, const struct bt_gatt_attr *attr,
+			 const void *buf, uint16_t len, uint16_t offset, uint8_t flags)
 {
-	printk("Indication %s\n", err != 0U ? "fail" : "success");
-}
+	ARG_UNUSED(c);
+	ARG_UNUSED(flags);
 
-static void indicate_destroy(struct bt_gatt_indicate_params *params)
-{
-	printk("Indication complete\n");
-	indicating = 0U;
-}
-
-#define VND_LONG_MAX_LEN 74
-static uint8_t vnd_long_value[VND_LONG_MAX_LEN + 1] = {
-		  'V', 'e', 'n', 'd', 'o', 'r', ' ', 'd', 'a', 't', 'a', '1',
-		  'V', 'e', 'n', 'd', 'o', 'r', ' ', 'd', 'a', 't', 'a', '2',
-		  'V', 'e', 'n', 'd', 'o', 'r', ' ', 'd', 'a', 't', 'a', '3',
-		  'V', 'e', 'n', 'd', 'o', 'r', ' ', 'd', 'a', 't', 'a', '4',
-		  'V', 'e', 'n', 'd', 'o', 'r', ' ', 'd', 'a', 't', 'a', '5',
-		  'V', 'e', 'n', 'd', 'o', 'r', ' ', 'd', 'a', 't', 'a', '6',
-		  '.', ' ' };
-
-static ssize_t write_long_vnd(struct bt_conn *conn,
-			      const struct bt_gatt_attr *attr, const void *buf,
-			      uint16_t len, uint16_t offset, uint8_t flags)
-{
-	uint8_t *value = attr->user_data;
-
-	if (flags & BT_GATT_WRITE_FLAG_PREPARE) {
-		return 0;
-	}
-
-	if (offset + len > VND_LONG_MAX_LEN) {
-		return BT_GATT_ERR(BT_ATT_ERR_INVALID_OFFSET);
-	}
-
-	memcpy(value + offset, buf, len);
-	value[offset + len] = 0;
-
-	return len;
-}
-
-LOG_MODULE_REGISTER(main, LOG_LEVEL_INF);
-
-
-static const struct bt_uuid_128 vnd_long_uuid = BT_UUID_INIT_128(
-	BT_UUID_128_ENCODE(0x12345678, 0x1234, 0x5678, 0x1234, 0x56789abcdef3));
-
-static struct bt_gatt_cep vnd_long_cep = {
-	.properties = BT_GATT_CEP_RELIABLE_WRITE,
-};
-
-static const struct bt_uuid_128 vnd_write_cmd_uuid = BT_UUID_INIT_128(
-	BT_UUID_128_ENCODE(0x12345678, 0x1234, 0x5678, 0x1234, 0x56789abcdef4));
-
-static ssize_t write_without_rsp_vnd(struct bt_conn *conn,
-				     const struct bt_gatt_attr *attr,
-				     const void *buf, uint16_t len, uint16_t offset,
-				     uint8_t flags)
-{
-	uint8_t *value = attr->user_data;
-
-	if (!(flags & BT_GATT_WRITE_FLAG_CMD)) {
-		/* Write Request received. Reject it since this Characteristic
-		 * only accepts Write Without Response.
-		 */
-		return BT_GATT_ERR(BT_ATT_ERR_WRITE_REQ_REJECTED);
-	}
+	uint8_t *value = (uint8_t *)attr->user_data;
 
 	if (offset + len > VND_MAX_LEN) {
 		return BT_GATT_ERR(BT_ATT_ERR_INVALID_OFFSET);
@@ -165,389 +160,177 @@ static ssize_t write_without_rsp_vnd(struct bt_conn *conn,
 	return len;
 }
 
-/* Vendor Primary Service Declaration */
-BT_GATT_SERVICE_DEFINE(vnd_svc,
-	BT_GATT_PRIMARY_SERVICE(&vnd_uuid),
-	BT_GATT_CHARACTERISTIC(&vnd_enc_uuid.uuid,
-			       BT_GATT_CHRC_READ | BT_GATT_CHRC_WRITE |
-			       BT_GATT_CHRC_INDICATE,
-			       BT_GATT_PERM_READ_ENCRYPT |
-			       BT_GATT_PERM_WRITE_ENCRYPT,
-			       read_vnd, write_vnd, vnd_value),
-	BT_GATT_CCC(vnd_ccc_cfg_changed,
-		    BT_GATT_PERM_READ | BT_GATT_PERM_WRITE_ENCRYPT),
-	BT_GATT_CHARACTERISTIC(&vnd_auth_uuid.uuid,
-			       BT_GATT_CHRC_READ | BT_GATT_CHRC_WRITE,
-			       BT_GATT_PERM_READ_AUTHEN |
-			       BT_GATT_PERM_WRITE_AUTHEN,
-			       read_vnd, write_vnd, vnd_auth_value),
-	BT_GATT_CHARACTERISTIC(&vnd_long_uuid.uuid, BT_GATT_CHRC_READ |
-			       BT_GATT_CHRC_WRITE | BT_GATT_CHRC_EXT_PROP,
-			       BT_GATT_PERM_READ | BT_GATT_PERM_WRITE |
-			       BT_GATT_PERM_PREPARE_WRITE,
-			       read_vnd, write_long_vnd, &vnd_long_value),
-	BT_GATT_CEP(&vnd_long_cep),
-	BT_GATT_CHARACTERISTIC(&vnd_write_cmd_uuid.uuid,
-			       BT_GATT_CHRC_WRITE_WITHOUT_RESP,
-			       BT_GATT_PERM_WRITE, NULL,
-			       write_without_rsp_vnd, &vnd_wwr_value),
-);
-/* --- 1Hz Indication test (dummy data) --- */
-static void vnd_indicate_work_handler(struct k_work *work);
-K_WORK_DELAYABLE_DEFINE(vnd_indicate_work, vnd_indicate_work_handler);
-
-static void vnd_indicate_work_handler(struct k_work *work)
+static void vnd_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t v)
 {
-    static uint8_t cnt;
-    static uint8_t data[5];   /* stable buffer for indicate */
-    uint32_t ts;
-
-    /* Only send when CCC Indicate enabled and not currently indicating */
-    if (simulate_vnd && !indicating) {
-        ts = k_uptime_get_32();
-
-        data[0] = cnt++;          /* dummy gesture type */
-        memcpy(&data[1], &ts, 4); /* dummy timestamp */
-
-        ind_params.attr = &vnd_svc.attrs[1];   /* abcdef1 characteristic value attr */
-        ind_params.func = indicate_cb;
-        ind_params.destroy = indicate_destroy;
-        ind_params.data = data;
-        ind_params.len = sizeof(data);
-
-        int err = bt_gatt_indicate(NULL, &ind_params);
-        if (err) {
-            printk("bt_gatt_indicate err %d\n", err);
-        } else {
-            indicating = 1U;
-        }
-    }
-
-    k_work_schedule(&vnd_indicate_work, K_SECONDS(1));
+	ARG_UNUSED(attr);
+	simulate_vnd = (v == BT_GATT_CCC_INDICATE);
+	LOG_INF("Indication %s", simulate_vnd ? "ON" : "OFF");
 }
 
+static void indicate_cb(struct bt_conn *c, struct bt_gatt_indicate_params *p, uint8_t e)
+{
+	ARG_UNUSED(c);
+	ARG_UNUSED(p);
+	indicating = 0;
+	if (e) {
+		LOG_WRN("Indication fail err=%u", e);
+	}
+}
+
+BT_GATT_SERVICE_DEFINE(vnd_svc,
+	BT_GATT_PRIMARY_SERVICE(&vnd_uuid),
+	BT_GATT_CHARACTERISTIC(&vnd_ind_uuid.uuid,
+		BT_GATT_CHRC_READ | BT_GATT_CHRC_WRITE | BT_GATT_CHRC_INDICATE,
+		BT_GATT_PERM_READ | BT_GATT_PERM_WRITE,
+		read_vnd, write_vnd, vnd_value),
+	BT_GATT_CCC(vnd_ccc_cfg_changed, BT_GATT_PERM_READ | BT_GATT_PERM_WRITE)
+);
+
+/* Advertising */
 static const struct bt_data ad[] = {
 	BT_DATA_BYTES(BT_DATA_FLAGS, (BT_LE_AD_GENERAL | BT_LE_AD_NO_BREDR)),
-	BT_DATA_BYTES(BT_DATA_UUID16_ALL,
-		      BT_UUID_16_ENCODE(BT_UUID_HRS_VAL),
-		      BT_UUID_16_ENCODE(BT_UUID_BAS_VAL),
-		      BT_UUID_16_ENCODE(BT_UUID_CTS_VAL)),
 	BT_DATA_BYTES(BT_DATA_UUID128_ALL, BT_UUID_CUSTOM_SERVICE_VAL),
 };
 
 static const struct bt_data sd[] = {
-	BT_DATA(BT_DATA_NAME_COMPLETE, CONFIG_BT_DEVICE_NAME, sizeof(CONFIG_BT_DEVICE_NAME) - 1),
-};
-static void i2c_scan_bus(void)
-{
-    const struct device *i2c = DEVICE_DT_GET(DT_NODELABEL(i2c0));
-
-    if (!device_is_ready(i2c)) {
-        LOG_ERR("I2C0 not ready");
-        return;
-    }
-
-    LOG_INF("I2C scan start (i2c0)...");
-    for (uint8_t addr = 0x03; addr <= 0x77; addr++) {
-        struct i2c_msg msg = {
-            .buf = NULL,
-            .len = 0,
-            .flags = I2C_MSG_WRITE | I2C_MSG_STOP,
-        };
-
-        if (i2c_transfer(i2c, &msg, 1, addr) == 0) {
-            LOG_INF("  Found device at 0x%02X", addr);
-        }
-    }
-    LOG_INF("I2C scan done.");
-}
-static void lsm6dso_read_loop(void)
-{
-    const struct device *imu =  DEVICE_DT_GET(DT_ALIAS(imu0));
-
-    if (!device_is_ready(imu)) {
-        LOG_ERR("LSM6DSO device not ready (check overlay + wiring)");
-        return;
-    }
-
-    LOG_INF("LSM6DSO ready! Reading accel/gyro...");
-
-    while (1) {
-        struct sensor_value acc[3];
-        struct sensor_value gyr[3];
-
-        int ret = sensor_sample_fetch(imu);
-        if (ret) {
-            LOG_ERR("sensor_sample_fetch failed: %d", ret);
-            k_msleep(500);
-            continue;
-        }
-
-        sensor_channel_get(imu, SENSOR_CHAN_ACCEL_XYZ, acc);
-        sensor_channel_get(imu, SENSOR_CHAN_GYRO_XYZ, gyr);
-
-        LOG_INF("ACC(m/s2): x=%d.%06d y=%d.%06d z=%d.%06d",
-                acc[0].val1, acc[0].val2,
-                acc[1].val1, acc[1].val2,
-                acc[2].val1, acc[2].val2);
-
-        LOG_INF("GYR(rad/s): x=%d.%06d y=%d.%06d z=%d.%06d",
-                gyr[0].val1, gyr[0].val2,
-                gyr[1].val1, gyr[1].val2,
-                gyr[2].val1, gyr[2].val2);
-
-        k_msleep(200);
-    }
-}
-
-
-void mtu_updated(struct bt_conn *conn, uint16_t tx, uint16_t rx)
-{
-	printk("Updated MTU: TX: %d RX: %d bytes\n", tx, rx);
-}
-
-static struct bt_gatt_cb gatt_callbacks = {
-	.att_mtu_updated = mtu_updated
+	BT_DATA(BT_DATA_NAME_COMPLETE, CONFIG_BT_DEVICE_NAME,
+		sizeof(CONFIG_BT_DEVICE_NAME) - 1),
 };
 
-static void connected(struct bt_conn *conn, uint8_t err)
+/* ================= Indication worker ================= */
+static void ind_work(struct k_work *w);
+K_WORK_DELAYABLE_DEFINE(ind_w, ind_work);
+
+static void ind_work(struct k_work *w)
 {
-	if (err) {
-		printk("Connection failed, err 0x%02x %s\n", err, bt_hci_err_to_str(err));
-	} else {
-		printk("Connected\n");
-	}
-}
+	ARG_UNUSED(w);
 
-static void disconnected(struct bt_conn *conn, uint8_t reason)
-{
-	printk("Disconnected, reason 0x%02x %s\n", reason, bt_hci_err_to_str(reason));
-}
+	if (simulate_vnd && !indicating) {
+		struct gesture_event ev;
+		if (k_msgq_get(&gesture_queue, &ev, K_NO_WAIT) == 0) {
+			ind_data[0] = ev.type;
+			sys_put_le32(ev.timestamp, &ind_data[1]);
 
-static void alert_stop(void)
-{
-	printk("Alert stopped\n");
-}
+			ind_params.attr = &vnd_svc.attrs[1];
+			ind_params.func = indicate_cb;
+			ind_params.data = ind_data;
+			ind_params.len  = sizeof(ind_data);
 
-static void alert_start(void)
-{
-	printk("Mild alert started\n");
-}
-
-static void alert_high_start(void)
-{
-	printk("High alert started\n");
-}
-
-BT_CONN_CB_DEFINE(conn_callbacks) = {
-	.connected = connected,
-	.disconnected = disconnected,
-};
-
-BT_IAS_CB_DEFINE(ias_callbacks) = {
-	.no_alert = alert_stop,
-	.mild_alert = alert_start,
-	.high_alert = alert_high_start,
-};
-
-static void bt_ready(void)
-{
-	int err;
-
-	printk("Bluetooth initialized\n");
-
-	if (IS_ENABLED(CONFIG_SETTINGS)) {
-		settings_load();
+			if (bt_gatt_indicate(NULL, &ind_params) == 0) {
+				indicating = 1;
+			}
+		}
 	}
 
-	err = bt_le_adv_start(BT_LE_ADV_CONN_FAST_1, ad, ARRAY_SIZE(ad), sd, ARRAY_SIZE(sd));
-	if (err) {
-		printk("Advertising failed to start (err %d)\n", err);
+	k_work_schedule(&ind_w, K_MSEC(200));
+}
+
+/* ================= IMU thread ================= */
+#define IMU_STACK 2048
+K_THREAD_STACK_DEFINE(imu_stack, IMU_STACK);
+static struct k_thread imu_t;
+
+static void imu_thread(void *a, void *b, void *c)
+{
+	ARG_UNUSED(a); ARG_UNUSED(b); ARG_UNUSED(c);
+
+	const struct device *imu = DEVICE_DT_GET(DT_ALIAS(imu0));
+	if (!device_is_ready(imu)) {
+		LOG_ERR("IMU not ready (check overlay + CONFIG_LSM6DSO)");
 		return;
 	}
 
-	printk("Advertising successfully started\n");
-}
+	struct sensor_value odr = { .val1 = 104, .val2 = 0 };
+	(void)sensor_attr_set(imu, SENSOR_CHAN_ACCEL_XYZ, SENSOR_ATTR_SAMPLING_FREQUENCY, &odr);
+	(void)sensor_attr_set(imu, SENSOR_CHAN_GYRO_XYZ,  SENSOR_ATTR_SAMPLING_FREQUENCY, &odr);
 
-static void auth_passkey_display(struct bt_conn *conn, unsigned int passkey)
-{
-	char addr[BT_ADDR_LE_STR_LEN];
+	LOG_INF("IMU thread started");
 
-	bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
+	while (1) {
+		struct imu_sample s = {0};
+		struct sensor_value ax, ay, az, gx, gy, gz;
 
-	printk("Passkey for %s: %06u\n", addr, passkey);
-}
+		if (sensor_sample_fetch(imu) == 0) {
+			(void)sensor_channel_get(imu, SENSOR_CHAN_ACCEL_X, &ax);
+			(void)sensor_channel_get(imu, SENSOR_CHAN_ACCEL_Y, &ay);
+			(void)sensor_channel_get(imu, SENSOR_CHAN_ACCEL_Z, &az);
+			(void)sensor_channel_get(imu, SENSOR_CHAN_GYRO_X,  &gx);
+			(void)sensor_channel_get(imu, SENSOR_CHAN_GYRO_Y,  &gy);
+			(void)sensor_channel_get(imu, SENSOR_CHAN_GYRO_Z,  &gz);
 
-static void auth_cancel(struct bt_conn *conn)
-{
-	char addr[BT_ADDR_LE_STR_LEN];
+			s.accel_x = sv_to_i16_milli(ax);
+			s.accel_y = sv_to_i16_milli(ay);
+			s.accel_z = sv_to_i16_milli(az);
+			s.gyro_x  = sv_to_i16_milli(gx);
+			s.gyro_y  = sv_to_i16_milli(gy);
+			s.gyro_z  = sv_to_i16_milli(gz);
+			s.timestamp = k_uptime_get_32();
 
-	bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
-
-	printk("Pairing cancelled: %s\n", addr);
-}
-
-static struct bt_conn_auth_cb auth_cb_display = {
-	.passkey_display = auth_passkey_display,
-	.passkey_entry = NULL,
-	.cancel = auth_cancel,
-};
-
-static void bas_notify(void)
-{
-	uint8_t battery_level = bt_bas_get_battery_level();
-
-	battery_level--;
-
-	if (!battery_level) {
-		battery_level = 100U;
-	}
-
-	bt_bas_set_battery_level(battery_level);
-}
-
-static uint8_t bt_heartrate = BT_HR_HEARTRATE_DEFAULT_MIN;
-
-static void hrs_notify(void)
-{
-	/* Heartrate measurements simulation */
-	bt_heartrate++;
-	if (bt_heartrate == BT_HR_HEARTRATE_DEFAULT_MAX) {
-		bt_heartrate = BT_HR_HEARTRATE_DEFAULT_MIN;
-	}
-
-	bt_hrs_notify(bt_heartrate);
-}
-
-/**
- * variable to hold reference milliseconds to epoch when device booted
- * this is only for demo purpose, for more precise synchronization please
- * review clock_settime API implementation.
- */
-static int64_t unix_ms_ref;
-static bool cts_notification_enabled;
-
-void bt_cts_notification_changed(bool enabled)
-{
-	cts_notification_enabled = enabled;
-}
-
-int bt_cts_cts_time_write(struct bt_cts_time_format *cts_time)
-{
-	int err;
-	int64_t unix_ms;
-
-	if (IS_ENABLED(CONFIG_BT_CTS_HELPER_API)) {
-		err = bt_cts_time_to_unix_ms(cts_time, &unix_ms);
-		if (err) {
-			return err;
+			(void)k_msgq_put(&sample_queue, &s, K_NO_WAIT);
 		}
-	} else {
-		return -ENOTSUP;
-	}
 
-	/* recalculate reference value */
-	unix_ms_ref = unix_ms - k_uptime_get();
-	return 0;
+		k_msleep(10);
+	}
 }
 
-int bt_cts_fill_current_cts_time(struct bt_cts_time_format *cts_time)
+/* ================= Gesture thread ================= */
+#define GESTURE_STACK 1024
+K_THREAD_STACK_DEFINE(gesture_stack, GESTURE_STACK);
+static struct k_thread gest_t;
+
+static void gesture_thread(void *a, void *b, void *c)
 {
-	int64_t unix_ms = unix_ms_ref + k_uptime_get();
+	ARG_UNUSED(a); ARG_UNUSED(b); ARG_UNUSED(c);
 
-	if (IS_ENABLED(CONFIG_BT_CTS_HELPER_API)) {
-		return bt_cts_time_from_unix_ms(cts_time, unix_ms);
-	} else {
-		return -ENOTSUP;
+	LOG_INF("Gesture thread started");
+
+	struct imu_sample s;
+
+	while (1) {
+		(void)k_msgq_get(&sample_queue, &s, K_FOREVER);
+
+		enum gesture_type g = detect_gesture_state(&s, k_uptime_get_32());
+		if (g != GESTURE_NONE) {
+			struct gesture_event ev = { .type = (uint8_t)g, .timestamp = k_uptime_get_32() };
+			(void)k_msgq_put(&gesture_queue, &ev, K_NO_WAIT);
+
+			if (g == GESTURE_LEFT)  LOG_INF("Gesture: LEFT");
+			if (g == GESTURE_RIGHT) LOG_INF("Gesture: RIGHT");
+			if (g == GESTURE_NOD)   LOG_INF("Gesture: NOD");
+		}
 	}
 }
-
-const struct bt_cts_cb cts_cb = {
-	.notification_changed = bt_cts_notification_changed,
-	.cts_time_write = bt_cts_cts_time_write,
-	.fill_current_cts_time = bt_cts_fill_current_cts_time,
-};
-
-static int bt_hrs_ctrl_point_write(uint8_t request)
-{
-	printk("HRS Control point request: %d\n", request);
-	if (request != BT_HRS_CONTROL_POINT_RESET_ENERGY_EXPANDED_REQ) {
-		return -ENOTSUP;
-	}
-
-	bt_heartrate = BT_HR_HEARTRATE_DEFAULT_MIN;
-	return 0;
-}
-
-static struct bt_hrs_cb hrs_cb = {
-	.ctrl_point_write = bt_hrs_ctrl_point_write,
-};
 
 int main(void)
 {
-	struct bt_gatt_attr *vnd_ind_attr;
-	char str[BT_UUID_STR_LEN];
-	int err;
+	LOG_INF("Boot");
 
-	i2c_scan_bus();
-	lsm6dso_read_loop();
+	k_thread_create(&imu_t, imu_stack, IMU_STACK,
+			imu_thread, NULL, NULL, NULL,
+			7, 0, K_NO_WAIT);
 
-	err = bt_enable(NULL);
+	k_thread_create(&gest_t, gesture_stack, GESTURE_STACK,
+			gesture_thread, NULL, NULL, NULL,
+			8, 0, K_NO_WAIT);
+
+	int err = bt_enable(NULL);
 	if (err) {
-		printk("Bluetooth init failed (err %d)\n", err);
+		LOG_ERR("bt_enable failed: %d", err);
+		return 0;
+	}
+	if (IS_ENABLED(CONFIG_SETTINGS)) {
+   	    settings_load();   
+	}	
+
+	err = bt_le_adv_start(BT_LE_ADV_CONN_FAST_1, ad, ARRAY_SIZE(ad), sd, ARRAY_SIZE(sd));
+	if (err) {
+		LOG_ERR("adv start failed: %d", err);
 		return 0;
 	}
 
-	bt_ready();
-	k_work_schedule(&vnd_indicate_work, K_SECONDS(1));
-	bt_cts_init(&cts_cb);
-	bt_hrs_cb_register(&hrs_cb);
+	k_work_schedule(&ind_w, K_MSEC(200));
 
-	bt_gatt_cb_register(&gatt_callbacks);
-	bt_conn_auth_cb_register(&auth_cb_display);
-
-	vnd_ind_attr = bt_gatt_find_by_uuid(vnd_svc.attrs, vnd_svc.attr_count,
-					    &vnd_enc_uuid.uuid);
-	bt_uuid_to_str(&vnd_enc_uuid.uuid, str, sizeof(str));
-	printk("Indicate VND attr %p (UUID %s)\n", vnd_ind_attr, str);
-
-	/* Implement notification. At the moment there is no suitable way
-	 * of starting delayed work so we do it here
-	 */
 	while (1) {
 		k_sleep(K_SECONDS(1));
-
-		/* Current time update notification example
-		 * For testing purposes, we send a manual update notification every second.
-		 * In production `bt_cts_send_notification` should only be used when time is changed
-		 */
-		if (cts_notification_enabled) {
-
-			bt_cts_send_notification(BT_CTS_UPDATE_REASON_MANUAL);
-		}
-		/* Heartrate measurements simulation */
-		hrs_notify();
-
-		/* Battery level simulation */
-		bas_notify();
-
-		/* Vendor indication simulation */
-		if (simulate_vnd && vnd_ind_attr) {
-			if (indicating) {
-				continue;
-			}
-
-			ind_params.attr = vnd_ind_attr;
-			ind_params.func = indicate_cb;
-			ind_params.destroy = indicate_destroy;
-			ind_params.data = &indicating;
-			ind_params.len = sizeof(indicating);
-
-			if (bt_gatt_indicate(NULL, &ind_params) == 0) {
-				indicating = 1U;
-			}
-		}
 	}
-	return 0;
 }
-
