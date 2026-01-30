@@ -86,7 +86,7 @@ This confirms the complete RTOS → Queue → BLE worker → Notify data path.
 
 ###  Short Demo Video (3 seconds)
 
-[▶ Watch BLE Notify demo](docs/ble_notify_demo_3s.mp4)
+[▶ Watch BLE Notify demo](docs/20260130_203237.mp4)
 
 Gesture → BLE → Phone in real time.
 
