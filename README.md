@@ -36,6 +36,61 @@ or
 - NOD (Y-axis acceleration)
 
 ---
+---
+
+## Demo (Week 3 – BLE Gesture Notify)
+
+Week 3 integrates the gesture pipeline with a custom 128-bit BLE GATT service.  
+Detected gestures are transmitted in real time to a mobile device via **BLE Notify** using a workqueue-driven architecture.
+
+###  BLE Gesture Notify Pipeline
+
+LSM6DSO → IMU Thread → sample_queue → Gesture Thread → gesture_queue → BLE Notify Worker → nRF Connect
+
+---
+
+###  Proof 1 — Hardware Setup (nRF52840 + LSM6DSO)
+
+![Hardware Setup](docs/20260130_203018.jpg)
+
+Real hardware prototype with nRF52840 DK and LSM6DSO IMU sensor.
+
+---
+
+###  Proof 2 — nRF Connect Receiving Notifications
+
+![nRF Connect Notify](docs/Screenshot_20260130_203028_nRF%20Connect.jpg)
+
+Custom 128-bit GATT service (`abcdef0`) and characteristic (`abcdef1`)  
+CCC enabled → **Notifications received (5-byte payload)**
+
+Payload format:
+byte0 = gesture type (1=NOD, 2=LEFT, 3=RIGHT)
+byte1~4 = timestamp (LE32)
+
+
+---
+
+###  Proof 3 — UART Logs Showing Full Pipeline
+
+![UART Logs](docs/20260130_203110.jpg)
+
+Key lines:
+Notifications enabled
+Notified: type=1 ts=724
+
+
+This confirms the complete RTOS → Queue → BLE worker → Notify data path.
+
+---
+
+###  Short Demo Video (3 seconds)
+
+[▶ Watch BLE Notify demo](docs/ble_notify_demo_3s.mp4)
+
+Gesture → BLE → Phone in real time.
+
+---
 
 ## System Architecture
 
