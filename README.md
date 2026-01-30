@@ -12,7 +12,7 @@ IMU-based gesture detection with a custom BLE GATT service, low-power design, an
 - Message queue–based data pipeline (`k_msgq`) ✅
 - State-based gesture detection (LEFT / RIGHT / NOD) with debounce ✅
 - Gesture stability verified via serial logs ✅
-- BLE GATT service (gesture notify) ⏳
+- BLE GATT service (custom 128-bit UUID + Notify worker + CCC) ✅
 - OTA / MCUboot rollback ⏳
 
 >  Development is temporarily blocked due to a **WSL2 environment failure**  
