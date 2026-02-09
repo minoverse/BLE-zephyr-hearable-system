@@ -260,3 +260,121 @@ git clone https://github.com/minoverse/BLE-zephyr-hearable-system.git
  Audio DMA (PDM) + ring buffer
 
  MCUboot OTA rollback integration
+# Week 6 — MCUboot + OTA + Automatic Rollback (nRF52840)
+
+## 🎯 Objective
+Implement **MCUboot bootloader** with **OTA firmware update capability** and **automatic rollback mechanism** on **nRF52840** using Zephyr + MCUmgr.
+
+---
+
+## ⚙️ Implementation Steps
+
+### 1️⃣ MCUboot Installation
+
+- Built and flashed **MCUboot v2.2.0** bootloader
+- Configured flash partitions:
+  - `boot`
+  - `slot0`
+  - `slot1`
+  - `storage`
+- Verified MCUboot startup logs on serial console
+
+**Result:** ✅ Bootloader successfully installed
+
+---
+
+### 2️⃣ Signed Firmware — v1.0.0
+
+- Added version info in `CMakeLists.txt`
+- Signed image using **imgtool** with **RSA-2048 key**
+- Flashed signed image to **slot0**
+
+**Result:** ✅ v1.0.0 booted successfully with MCUboot validation
+
+---
+
+### 3️⃣ Crash Test Firmware — v1.1.0 (Rollback Test)
+
+Intentional crash firmware to verify rollback:
+
+```c
+int main(void) {
+    LOG_INF("v1.1.0 (CRASH TEST)");
+    k_msleep(3000);
+    int *ptr = NULL;
+    *ptr = 42;  // Trigger fault
+}
+Result: ✅ USAGE FAULT triggered as expected
+
+🐛 Challenges & Solutions
+❗ Challenge 1 — mcumgr Upload Stuck at 0B
+Problem
+
+0 B / 143.02 KiB [----] 0.00%
+Upload never progressed using mcumgr CLI.
+
+Root Cause
+
+High-frequency sensor logging flooded the UART, drowning mcumgr packets.
+
+Solution
+
+Disabled logs in prj.conf:
+
+CONFIG_LOG=n
+CONFIG_UART_CONSOLE=n
+Rebuilt silent firmware
+
+Used nRF Device Manager mobile app instead of mcumgr CLI
+
+Result: ✅ OTA upload successful
+
+❗ Challenge 2 — ZCBOR Dependency Missing
+Error
+
+MCUMGR requires ZCBOR (=n)
+Solution
+
+CONFIG_ZCBOR=y
+CONFIG_MCUMGR=y
+CONFIG_MCUMGR_TRANSPORT_BT=y
+Result: ✅ Build successful with MCUmgr support
+
+🔁 Automatic Rollback — Verified
+
+
+Key MCUboot Logs
+
+I: Swap type: test
+I: Jumping to the first image
+(crash occurs here)
+I: Swap type: revert
+I: Starting swap using offset
+🧭 Rollback Timeline
+⬆️ Uploaded v1.1.0 to slot1 via nRF Device Manager
+
+🔄 Device rebooted to test new firmware
+
+💥 Crash triggered after 3 seconds
+
+⚡ Watchdog reset detected failure
+
+↩️ MCUboot automatically reverted to v1.0.0
+
+✅ Device recovered without manual intervention
+
+✅ Achievements
+Requirement	Status
+MCUboot installation	✅ Complete
+Image signing	✅ Complete
+Dual-slot OTA	✅ Complete
+Crash detection	✅ Complete
+Automatic rollback	✅ Verified
+💡 Key Learnings
+Serial logging can break mcumgr communication
+
+Mobile tools can be more reliable than CLI for OTA
+
+MCUboot rollback provides true zero-brick guarantee
+
+ZCBOR must be explicitly enabled in Kconfig
