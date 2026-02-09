@@ -393,8 +393,32 @@ I: Starting swap using offset   ← Reverting to v1.0.0
 4. **ZCBOR must be explicitly enabled in Kconfig** — Not auto-selected by MCUMGR
 
 ---
+### MCUboot Setup
+- [x] Added MCUboot configuration to `prj.conf`
+- [x] Created flash partition overlay file
+- [x] Successfully built and flashed MCUboot
+- [x] Verified `"Starting MCUboot"` log on boot
 
-##  Next Steps
+### ✅ OTA Update
+- [x] Built and signed firmware v1.0.0
+- [x] Successfully flashed to Slot 0
+- [x] Verified normal boot
+
+### ✅ Rollback Test
+- [x] Created crash-test firmware v1.1.0
+- [x] Used nRF Device Manager for OTA upload
+- [x] Successfully uploaded to Slot 1
+- [x] Set image to **test mode**
+- [x] Observed crash after reboot
+- [x] Verified automatic rollback
+- [x] Confirmed recovery to v1.0.0
+
+### ✅ Documentation
+- [x] Documented rollback flow
+- [x] Captured and saved logs
+- [x] Took rollback verification screenshot
+
+###  Next Steps
 - Week 6.5: Integrate Golioth IoT platform for cloud-based OTA
 - Add adaptive power reporting
 - Implement remote calibration via RPC
