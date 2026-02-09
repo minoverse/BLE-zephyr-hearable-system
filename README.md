@@ -260,14 +260,14 @@ git clone https://github.com/minoverse/BLE-zephyr-hearable-system.git
  Audio DMA (PDM) + ring buffer
 
  MCUboot OTA rollback integration
-# Week 6 — MCUboot + OTA + Automatic Rollback (nRF52840)
+### Week 6 — MCUboot + OTA + Automatic Rollback (nRF52840)
 
-## 🎯 Objective
+### 🎯 Objective
 Implement **MCUboot bootloader** with **OTA firmware update capability** and **automatic rollback mechanism** on **nRF52840** using Zephyr + MCUmgr.
 
 ---
 
-## ⚙️ Implementation Steps
+### ⚙️ Implementation Steps
 
 ### 1️⃣ MCUboot Installation
 
