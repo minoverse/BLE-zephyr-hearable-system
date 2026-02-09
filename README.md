@@ -260,17 +260,16 @@ git clone https://github.com/minoverse/BLE-zephyr-hearable-system.git
  Audio DMA (PDM) + ring buffer
 
  MCUboot OTA rollback integration
-### Week 6 — MCUboot + OTA + Automatic Rollback (nRF52840)
+# Week 6 — MCUboot + OTA + Automatic Rollback (nRF52840)
 
-### 🎯 Objective
+## 🎯 Objective
 Implement **MCUboot bootloader** with **OTA firmware update capability** and **automatic rollback mechanism** on **nRF52840** using Zephyr + MCUmgr.
 
 ---
 
-### ⚙️ Implementation Steps
+## ⚙️ Implementation Steps
 
 ### 1️⃣ MCUboot Installation
-
 - Built and flashed **MCUboot v2.2.0** bootloader
 - Configured flash partitions:
   - `boot`
@@ -284,7 +283,6 @@ Implement **MCUboot bootloader** with **OTA firmware update capability** and **a
 ---
 
 ### 2️⃣ Signed Firmware — v1.0.0
-
 - Added version info in `CMakeLists.txt`
 - Signed image using **imgtool** with **RSA-2048 key**
 - Flashed signed image to **slot0**
@@ -294,9 +292,7 @@ Implement **MCUboot bootloader** with **OTA firmware update capability** and **a
 ---
 
 ### 3️⃣ Crash Test Firmware — v1.1.0 (Rollback Test)
-
 Intentional crash firmware to verify rollback:
-
 ```c
 int main(void) {
     LOG_INF("v1.1.0 (CRASH TEST)");
@@ -304,77 +300,101 @@ int main(void) {
     int *ptr = NULL;
     *ptr = 42;  // Trigger fault
 }
-Result: ✅ USAGE FAULT triggered as expected
+```
 
-🐛 Challenges & Solutions
-❗ Challenge 1 — mcumgr Upload Stuck at 0B
-Problem
+**Result:** ✅ USAGE FAULT triggered as expected
 
+---
+
+## 🐛 Challenges & Solutions
+
+### ❗ Challenge 1 — mcumgr Upload Stuck at 0B
+
+**Problem:**
+```
 0 B / 143.02 KiB [----] 0.00%
+```
 Upload never progressed using mcumgr CLI.
 
-Root Cause
-
+**Root Cause:**
 High-frequency sensor logging flooded the UART, drowning mcumgr packets.
 
-Solution
-
-Disabled logs in prj.conf:
-
+**Solution:**
+1. Disabled logs in `prj.conf`:
+```ini
 CONFIG_LOG=n
 CONFIG_UART_CONSOLE=n
-Rebuilt silent firmware
+```
+2. Rebuilt silent firmware
+3. Used **nRF Device Manager** mobile app instead of mcumgr CLI
 
-Used nRF Device Manager mobile app instead of mcumgr CLI
+**Result:** ✅ OTA upload successful
 
-Result: ✅ OTA upload successful
+---
 
-❗ Challenge 2 — ZCBOR Dependency Missing
-Error
+### ❗ Challenge 2 — ZCBOR Dependency Missing
 
+**Error:**
+```
 MCUMGR requires ZCBOR (=n)
-Solution
+```
 
+**Solution:**
+```ini
 CONFIG_ZCBOR=y
 CONFIG_MCUMGR=y
 CONFIG_MCUMGR_TRANSPORT_BT=y
-Result: ✅ Build successful with MCUmgr support
+```
 
-🔁 Automatic Rollback — Verified
+**Result:** ✅ Build successful with MCUmgr support
 
+---
 
-Key MCUboot Logs
+## 🔁 Automatic Rollback — Verified
 
-I: Swap type: test
-I: Jumping to the first image
+![Rollback Log](docs/images/week6_rollback.png)
+
+**Key MCUboot Logs:**
+```
+I: Swap type: test              ← v1.1.0 uploaded
+I: Jumping to the first image   ← Boot attempt
 (crash occurs here)
-I: Swap type: revert
-I: Starting swap using offset
-🧭 Rollback Timeline
-⬆️ Uploaded v1.1.0 to slot1 via nRF Device Manager
+I: Swap type: revert            ← Rollback triggered!
+I: Starting swap using offset   ← Reverting to v1.0.0
+```
 
-🔄 Device rebooted to test new firmware
+### 🧭 Rollback Timeline
+1. ⬆️ Uploaded v1.1.0 to slot1 via nRF Device Manager
+2. 🔄 Device rebooted to test new firmware
+3. 💥 Crash triggered after 3 seconds
+4. ⚡ Watchdog reset detected failure
+5. ↩️ MCUboot automatically reverted to v1.0.0
+6. ✅ Device recovered without manual intervention
 
-💥 Crash triggered after 3 seconds
+---
 
-⚡ Watchdog reset detected failure
+## ✅ Achievements
 
-↩️ MCUboot automatically reverted to v1.0.0
+| Requirement | Status |
+|------------|--------|
+| MCUboot installation | ✅ Complete |
+| Image signing | ✅ Complete |
+| Dual-slot OTA | ✅ Complete |
+| Crash detection | ✅ Complete |
+| **Automatic rollback** | ✅ **Verified** |
 
-✅ Device recovered without manual intervention
+---
 
-✅ Achievements
-Requirement	Status
-MCUboot installation	✅ Complete
-Image signing	✅ Complete
-Dual-slot OTA	✅ Complete
-Crash detection	✅ Complete
-Automatic rollback	✅ Verified
-💡 Key Learnings
-Serial logging can break mcumgr communication
+## 💡 Key Learnings
 
-Mobile tools can be more reliable than CLI for OTA
+1. **Serial logging can break mcumgr communication** — Disable logs during OTA
+2. **Mobile tools can be more reliable than CLI** — nRF Device Manager bypassed UART issues
+3. **MCUboot rollback provides true zero-brick guarantee** — Validated with crash test
+4. **ZCBOR must be explicitly enabled in Kconfig** — Not auto-selected by MCUMGR
 
-MCUboot rollback provides true zero-brick guarantee
+---
 
-ZCBOR must be explicitly enabled in Kconfig
+## 🚀 Next Steps
+- Week 6.5: Integrate Golioth IoT platform for cloud-based OTA
+- Add adaptive power reporting
+- Implement remote calibration via RPC
