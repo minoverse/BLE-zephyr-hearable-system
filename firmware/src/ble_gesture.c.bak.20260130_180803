@@ -1,0 +1,167 @@
+#include "ble_gesture.h"
+
+#include <zephyr/settings/settings.h>
+#include <zephyr/sys/byteorder.h>
+#include <zephyr/logging/log.h>
+
+#include <zephyr/bluetooth/bluetooth.h>
+#include <zephyr/bluetooth/uuid.h>
+#include <zephyr/bluetooth/gatt.h>
+
+#include "app_types.h"
+
+LOG_MODULE_REGISTER(ble_gesture, LOG_LEVEL_INF);
+
+/* ---------- UUIDs (service abcdef0, event abcdef1) ---------- */
+#define BT_UUID_CUSTOM_SERVICE_VAL \
+	BT_UUID_128_ENCODE(0x12345678,0x1234,0x5678,0x1234,0x56789abcdef0)
+
+static const struct bt_uuid_128 vnd_uuid =
+	BT_UUID_INIT_128(BT_UUID_CUSTOM_SERVICE_VAL);
+
+static const struct bt_uuid_128 vnd_ind_uuid =
+	BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x12345678,0x1234,0x5678,0x1234,0x56789abcdef1));
+
+#define VND_MAX_LEN 20
+static uint8_t vnd_value[VND_MAX_LEN + 1] = { 'V','e','n','d','o','r',0 };
+
+/* ---------- Indication state ---------- */
+static uint8_t ccc_ind_enabled;
+static uint8_t indicating;
+static struct bt_gatt_indicate_params ind_params;
+static uint8_t ind_data[5]; /* [0]=type [1..4]=timestamp(le32) */
+
+/* gesture queue binding */
+static struct k_msgq *gq;
+
+/* CCC callback */
+static void vnd_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value)
+{
+	ARG_UNUSED(attr);
+	ccc_ind_enabled = (value == BT_GATT_CCC_INDICATE);
+	LOG_INF("Indication %s", ccc_ind_enabled ? "ENABLED" : "DISABLED");
+}
+
+/* indicate ACK callback */
+static void indicate_cb(struct bt_conn *conn,
+			struct bt_gatt_indicate_params *params,
+			uint8_t err)
+{
+	ARG_UNUSED(conn);
+	ARG_UNUSED(params);
+
+	indicating = 0U;
+	if (err) {
+		LOG_WRN("Indication failed (err=%u)", err);
+	}
+}
+
+/* basic read/write (optional) */
+static ssize_t read_vnd(struct bt_conn *c, const struct bt_gatt_attr *attr,
+			void *buf, uint16_t len, uint16_t offset)
+{
+	const char *value = (const char *)attr->user_data;
+	return bt_gatt_attr_read(c, attr, buf, len, offset, value, strlen(value));
+}
+
+static ssize_t write_vnd(struct bt_conn *c, const struct bt_gatt_attr *attr,
+			 const void *buf, uint16_t len, uint16_t offset, uint8_t flags)
+{
+	ARG_UNUSED(c);
+	ARG_UNUSED(flags);
+
+	uint8_t *value = (uint8_t *)attr->user_data;
+
+	if (offset + len > VND_MAX_LEN) {
+		return BT_GATT_ERR(BT_ATT_ERR_INVALID_OFFSET);
+	}
+
+	memcpy(value + offset, buf, len);
+	value[offset + len] = 0;
+	return len;
+}
+
+/* Service */
+BT_GATT_SERVICE_DEFINE(vnd_svc,
+	BT_GATT_PRIMARY_SERVICE(&vnd_uuid),
+	BT_GATT_CHARACTERISTIC(&vnd_ind_uuid.uuid,
+		BT_GATT_CHRC_READ | BT_GATT_CHRC_WRITE | BT_GATT_CHRC_INDICATE,
+		BT_GATT_PERM_READ | BT_GATT_PERM_WRITE,
+		read_vnd, write_vnd, vnd_value),
+	BT_GATT_CCC(vnd_ccc_cfg_changed, BT_GATT_PERM_READ | BT_GATT_PERM_WRITE)
+);
+
+/* Advertising */
+static const struct bt_data ad[] = {
+	BT_DATA_BYTES(BT_DATA_FLAGS, (BT_LE_AD_GENERAL | BT_LE_AD_NO_BREDR)),
+	BT_DATA_BYTES(BT_DATA_UUID128_ALL, BT_UUID_CUSTOM_SERVICE_VAL),
+};
+
+static const struct bt_data sd[] = {
+	BT_DATA(BT_DATA_NAME_COMPLETE, CONFIG_BT_DEVICE_NAME,
+		sizeof(CONFIG_BT_DEVICE_NAME) - 1),
+};
+
+/* ---------- periodic sender worker ---------- */
+static void send_work(struct k_work *work);
+K_WORK_DELAYABLE_DEFINE(send_w, send_work);
+
+static void send_work(struct k_work *work)
+{
+	ARG_UNUSED(work);
+
+	if (ccc_ind_enabled && !indicating && gq) {
+		struct gesture_event ev;
+
+		if (k_msgq_get(gq, &ev, K_NO_WAIT) == 0) {
+			ind_data[0] = ev.type;
+			sys_put_le32(ev.timestamp, &ind_data[1]);
+
+			ind_params.attr = &vnd_svc.attrs[1]; /* VALUE attr */
+			ind_params.func = indicate_cb;
+			ind_params.data = ind_data;
+			ind_params.len  = sizeof(ind_data);
+
+			if (bt_gatt_indicate(NULL, &ind_params) == 0) {
+				indicating = 1U;
+				LOG_INF("Sent event: type=%u ts=%u",
+					ind_data[0], sys_get_le32(&ind_data[1]));
+			}
+		}
+	}
+
+	/* 200ms tick */
+	k_work_schedule(&send_w, K_MSEC(200));
+}
+
+void ble_gesture_bind_queue(struct k_msgq *gesture_q)
+{
+	gq = gesture_q;
+}
+
+void ble_gesture_start(void)
+{
+	k_work_schedule(&send_w, K_MSEC(200));
+}
+
+int ble_gesture_init(void)
+{
+	int err = bt_enable(NULL);
+	if (err) {
+		LOG_ERR("bt_enable failed: %d", err);
+		return err;
+	}
+
+	if (IS_ENABLED(CONFIG_SETTINGS)) {
+		settings_load();
+	}
+
+	err = bt_le_adv_start(BT_LE_ADV_CONN_FAST_1, ad, ARRAY_SIZE(ad), sd, ARRAY_SIZE(sd));
+	if (err) {
+		LOG_ERR("Advertising start failed: %d", err);
+		return err;
+	}
+
+	LOG_INF("BLE advertising started");
+	return 0;
+}

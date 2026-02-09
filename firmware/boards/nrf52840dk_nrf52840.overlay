@@ -1,5 +1,13 @@
 / {
-    aliases { imu0 = &lsm6dso0; };
+    chosen {
+        /* Set slot0 as the primary code execution area */
+        zephyr,code-partition = &slot0_partition;
+    };
+
+    aliases {
+        /* Alias for the IMU sensor */
+        imu0 = &lsm6dso0;
+    };
 };
 
 &i2c0 {
@@ -13,3 +21,34 @@
     };
 };
 
+&flash0 {
+    partitions {
+        compatible = "fixed-partitions";
+        #address-cells = <1>;
+        #size-cells = <1>;
+
+        /* MCUboot Bootloader Area (48KB) */
+        boot_partition: partition@0 {
+            label = "mcuboot";
+            reg = <0x00000000 0xc000>;
+        };
+
+        /* Slot 0: Primary firmware image (472KB) */
+        slot0_partition: partition@c000 {
+            label = "image-0";
+            reg = <0x0000c000 0x76000>;
+        };
+
+        /* Slot 1: Secondary (OTA) firmware image (472KB) */
+        slot1_partition: partition@82000 {
+            label = "image-1";
+            reg = <0x00082000 0x76000>;
+        };
+
+        /* Storage: Non-volatile storage for settings (32KB) */
+        storage_partition: partition@f8000 {
+            label = "storage";
+            reg = <0x000f8000 0x00008000>;
+        };
+    };
+};

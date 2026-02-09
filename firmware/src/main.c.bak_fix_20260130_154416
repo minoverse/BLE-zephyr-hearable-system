@@ -3,7 +3,7 @@
  * - imu.c: IMU init + read_sample
  * - gesture_detect.c: pure state-based detect
  * - gesture_thread.c: threads + msgq pipeline
- * - gesture_service.c: custom GATT + advertising + indication worker
+ * - ble_gesture.c: custom GATT + advertising + indication worker
  */
 
 #include <zephyr/kernel.h>
@@ -11,7 +11,7 @@
 
 #include "app_types.h"
 #include "gesture_thread.h"
-#include "gesture_service.h"
+#include "ble_gesture.h"
 
 LOG_MODULE_REGISTER(main, LOG_LEVEL_INF);
 
@@ -24,12 +24,6 @@ K_MSGQ_DEFINE(gesture_queue, sizeof(struct gesture_event), GESTURE_QUEUE_SIZE, 4
 
 int main(void)
 {
-	LOG_INF("========================================");
-        LOG_INF("BLE Hearable System v%d.%d.%d",
-           	 APP_VERSION_MAJOR, 
-           	 APP_VERSION_MINOR, 
-           	 APP_VERSION_PATCH);
-        LOG_INF("========================================");
 	LOG_INF("Boot: BLE Hearable (IMU->Gesture->BLE)");
 
 	/* start IMU + gesture threads */
@@ -40,19 +34,15 @@ int main(void)
 	}
 
 	/* BLE init + bind gesture queue for sender worker */
-	ble_gesture_bind_queue(&gesture_queue);
-
-	ret = ble_gesture_init();
-	if (ret) {
-		LOG_ERR("ble_gesture_init failed: %d", ret);
-		return 0;
-	}
-
-	ret = ble_gesture_start();
+	ble_gesture_start();
 	if (ret) {
 		LOG_ERR("ble_gesture_start failed: %d", ret);
 		return 0;
 	}
+
+	ble_gesture_bind_queue(&gesture_queue);
+	ble_gesture_start();
+
 	while (1) {
 		k_sleep(K_SECONDS(1));
 	}
