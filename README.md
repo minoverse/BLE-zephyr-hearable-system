@@ -352,7 +352,7 @@ CONFIG_MCUMGR_TRANSPORT_BT=y
 
 ##  Automatic Rollback — Verified
 
-![Rollback Log](docs/images/week6_rollback.png)
+![Rollback Log](docs/images/20260209_203943.jpg)
 
 **Key MCUboot Logs:**
 ```
