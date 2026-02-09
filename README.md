@@ -306,9 +306,9 @@ int main(void) {
 
 ---
 
-## 🐛 Challenges & Solutions
+##  Challenges & Solutions
 
-### ❗ Challenge 1 — mcumgr Upload Stuck at 0B
+###  Challenge 1 — mcumgr Upload Stuck at 0B
 
 **Problem:**
 ```
@@ -332,7 +332,7 @@ CONFIG_UART_CONSOLE=n
 
 ---
 
-### ❗ Challenge 2 — ZCBOR Dependency Missing
+###  Challenge 2 — ZCBOR Dependency Missing
 
 **Error:**
 ```
@@ -350,7 +350,7 @@ CONFIG_MCUMGR_TRANSPORT_BT=y
 
 ---
 
-## 🔁 Automatic Rollback — Verified
+##  Automatic Rollback — Verified
 
 ![Rollback Log](docs/images/week6_rollback.png)
 
@@ -363,17 +363,17 @@ I: Swap type: revert            ← Rollback triggered!
 I: Starting swap using offset   ← Reverting to v1.0.0
 ```
 
-### 🧭 Rollback Timeline
-1. ⬆️ Uploaded v1.1.0 to slot1 via nRF Device Manager
-2. 🔄 Device rebooted to test new firmware
-3. 💥 Crash triggered after 3 seconds
-4. ⚡ Watchdog reset detected failure
-5. ↩️ MCUboot automatically reverted to v1.0.0
-6. ✅ Device recovered without manual intervention
+###  Rollback Timeline
+1.  Uploaded v1.1.0 to slot1 via nRF Device Manager
+2.  Device rebooted to test new firmware
+3.  Crash triggered after 3 seconds
+4.  Watchdog reset detected failure
+5.  MCUboot automatically reverted to v1.0.0
+6.  Device recovered without manual intervention
 
 ---
 
-## ✅ Achievements
+##  Achievements
 
 | Requirement | Status |
 |------------|--------|
@@ -385,7 +385,7 @@ I: Starting swap using offset   ← Reverting to v1.0.0
 
 ---
 
-## 💡 Key Learnings
+##  Key Learnings
 
 1. **Serial logging can break mcumgr communication** — Disable logs during OTA
 2. **Mobile tools can be more reliable than CLI** — nRF Device Manager bypassed UART issues
@@ -394,7 +394,7 @@ I: Starting swap using offset   ← Reverting to v1.0.0
 
 ---
 
-## 🚀 Next Steps
+##  Next Steps
 - Week 6.5: Integrate Golioth IoT platform for cloud-based OTA
 - Add adaptive power reporting
 - Implement remote calibration via RPC
