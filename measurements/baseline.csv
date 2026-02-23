@@ -1,0 +1,6 @@
+Scenario,Current_mA,Peak_mA,Notes
+Idle,0.52,2.48,BLE enabled polling
+Advertising,4.88,12.17,BLE advertising polling
+Connected,4.89,12.03,Connected no data polling
+Notify_1Hz,0.92,13.69,Trigger firmware (mixed)
+Active_10Hz,0.92,13.51,Trigger firmware (mixed)

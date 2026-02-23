@@ -110,6 +110,42 @@ static void ble_notify_work_handler(struct k_work *work)
 	k_work_schedule(&ble_notify_work, K_MSEC(200));
 }
 
+/* ---- Connection parameter update (for PM sleep) ---- */
+/*
+ * Request 100–500 ms connection interval so the BLE radio is idle long
+ * enough for the PM subsystem to enter a named power state between events.
+ * Unit = 1.25 ms  →  80 = 100 ms,  400 = 500 ms
+ */
+#define CONN_INTERVAL_MIN  80   /* 100 ms */
+#define CONN_INTERVAL_MAX  400  /* 500 ms */
+
+static const struct bt_le_conn_param slow_params =
+	BT_LE_CONN_PARAM_INIT(CONN_INTERVAL_MIN, CONN_INTERVAL_MAX, 0, 400);
+
+static void on_connected(struct bt_conn *conn, uint8_t err)
+{
+	if (err) {
+		LOG_ERR("Connection failed: %u", err);
+		return;
+	}
+	LOG_INF("Connected — requesting slow conn interval (%d–%d * 1.25ms)",
+		CONN_INTERVAL_MIN, CONN_INTERVAL_MAX);
+	int ret = bt_conn_le_param_update(conn, &slow_params);
+	if (ret) {
+		LOG_WRN("conn param update request failed: %d", ret);
+	}
+}
+
+static void on_disconnected(struct bt_conn *conn, uint8_t reason)
+{
+	LOG_INF("Disconnected (reason 0x%02x)", reason);
+}
+
+BT_CONN_CB_DEFINE(conn_cb) = {
+	.connected    = on_connected,
+	.disconnected = on_disconnected,
+};
+
 /* ---- Public API ---- */
 void ble_gesture_bind_queue(struct k_msgq *gesture_q)
 {

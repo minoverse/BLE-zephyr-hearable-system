@@ -1,23 +1,37 @@
 / {
     chosen {
-        /* Set slot0 as the primary code execution area */
         zephyr,code-partition = &slot0_partition;
     };
 
-    aliases {
-        /* Alias for the IMU sensor */
-        imu0 = &lsm6dso0;
+    /*
+     * PM power states for nRF52840.
+     * min-residency-us: minimum idle window before the PM policy commits to
+     *   this state.  500 µs is well below the IMU interrupt period (~83 ms at
+     *   12 Hz ODR) so virtually every idle window qualifies.
+     * exit-latency-us: worst-case wakeup time before the CPU is active again.
+     */
+    power-states {
+        suspend_to_idle: suspend-to-idle {
+            compatible = "zephyr,power-state";
+            power-state-name = "suspend-to-idle";
+            min-residency-us = <500>;
+            exit-latency-us = <100>;
+        };
     };
 };
 
-&i2c0 {
-    status = "okay";
-    clock-frequency = <I2C_BITRATE_STANDARD>;
+/* Link the power state to the Cortex-M4 core so the PM policy can select it.
+ * nRF52840 DTSI has no 'cpu0' label; reference by path instead. */
+&{/cpus/cpu@0} {
+    cpu-power-states = <&suspend_to_idle>;
+};
 
+&i2c0 {
     lsm6dso0: lsm6dso@6a {
         compatible = "st,lsm6dso";
         reg = <0x6a>;
-        status = "okay";
+        irq-gpios = <&gpio0 4 GPIO_ACTIVE_HIGH>;
+        int-pin = <2>;
     };
 };
 
@@ -26,26 +40,18 @@
         compatible = "fixed-partitions";
         #address-cells = <1>;
         #size-cells = <1>;
-
-        /* MCUboot Bootloader Area (48KB) */
         boot_partition: partition@0 {
             label = "mcuboot";
             reg = <0x00000000 0xc000>;
         };
-
-        /* Slot 0: Primary firmware image (472KB) */
         slot0_partition: partition@c000 {
             label = "image-0";
             reg = <0x0000c000 0x76000>;
         };
-
-        /* Slot 1: Secondary (OTA) firmware image (472KB) */
         slot1_partition: partition@82000 {
             label = "image-1";
             reg = <0x00082000 0x76000>;
         };
-
-        /* Storage: Non-volatile storage for settings (32KB) */
         storage_partition: partition@f8000 {
             label = "storage";
             reg = <0x000f8000 0x00008000>;

@@ -17,10 +17,15 @@ target_sources(app PRIVATE
   src/imu.c
   src/gesture_detect.c
   src/gesture_thread.c
-  src/gesture_service.c
+  src/adaptive_power.c
+  src/power_stats.c
 )
 
-# 4. Pass versions to C code so main.c can use them
+if(CONFIG_BT)
+  target_sources(app PRIVATE src/gesture_service.c)
+endif()
+
+# 4. Pass versions to C code
 target_compile_definitions(app PRIVATE
   -DAPP_VERSION_MAJOR=${APP_VERSION_MAJOR}
   -DAPP_VERSION_MINOR=${APP_VERSION_MINOR}

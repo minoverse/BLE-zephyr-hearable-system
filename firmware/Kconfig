@@ -1,0 +1,12 @@
+mainmenu "BLE Hearable System"
+
+# nRF52840 PM workaround
+config APP_PM_HOOKS
+    bool
+    default y
+    select HAS_PM
+    help
+      Provides the pm_state_set() and pm_state_exit_post_ops() hooks.
+      Without this, CONFIG_PM silently resolves to 'n' on nRF52840.
+
+source "Kconfig.zephyr"

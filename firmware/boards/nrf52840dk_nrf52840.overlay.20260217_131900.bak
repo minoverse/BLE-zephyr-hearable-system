@@ -1,0 +1,50 @@
+/ {
+    chosen {
+        zephyr,code-partition = &slot0_partition;
+    };
+
+    aliases {
+        imu0 = &lsm6dso0;
+    };
+};
+
+&i2c0 {
+    status = "okay";
+    clock-frequency = <I2C_BITRATE_STANDARD>;
+
+    lsm6dso0: lsm6dso@6a {
+        compatible = "st,lsm6dso";
+        reg = <0x6a>;
+        status = "okay";
+        irq-gpios = <&gpio0 3 GPIO_ACTIVE_HIGH>;
+        int-pin = <1>;
+    };
+};
+
+&flash0 {
+    partitions {
+        compatible = "fixed-partitions";
+        #address-cells = <1>;
+        #size-cells = <1>;
+
+        boot_partition: partition@0 {
+            label = "mcuboot";
+            reg = <0x00000000 0xc000>;
+        };
+
+        slot0_partition: partition@c000 {
+            label = "image-0";
+            reg = <0x0000c000 0x76000>;
+        };
+
+        slot1_partition: partition@82000 {
+            label = "image-1";
+            reg = <0x00082000 0x76000>;
+        };
+
+        storage_partition: partition@f8000 {
+            label = "storage";
+            reg = <0x000f8000 0x00008000>;
+        };
+    };
+};

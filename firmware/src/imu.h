@@ -1,12 +1,13 @@
-#ifndef IMU_H_
-#define IMU_H_
+#ifndef IMU_H
+#define IMU_H
 
-#include <zephyr/device.h>
-#include <zephyr/drivers/sensor.h>
+#include <zephyr/kernel.h>
 #include "app_types.h"
 
-/* IMU module: init + read_sample  */
 int imu_init(void);
-int imu_read_sample(struct imu_sample *out);
+int imu_read_sample(struct imu_sample *sample);
+int imu_trigger_start(struct k_msgq *queue);
+int imu_set_odr(uint32_t hz);
+void imu_thread_entry(void *p1, void *p2, void *p3);
 
-#endif /* IMU_H_ */
+#endif
