@@ -566,7 +566,7 @@ But PPK2 measured:
 ## Measurement Evidence
 
 ### Screenshots
-![Ultra Low Power Mode](measurements/screenshots/ppk_day3_ultra_low_power.png)
+![Ultra Low Power Mode](measurements/20260224_081246.jpg)
 *Ultra Low Power: 0.576mA with 98% sleep residency*
 
 #### Raw Data (Large Files)
