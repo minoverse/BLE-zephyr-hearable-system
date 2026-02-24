@@ -569,10 +569,16 @@ But PPK2 measured:
 ![Ultra Low Power Mode](measurements/screenshots/ppk_day3_ultra_low_power.png)
 *Ultra Low Power: 0.576mA with 98% sleep residency*
 
-### Data Files
-- [Baseline Measurements](measurements/baseline.csv)
-- [Day 3: Adaptive Modes](measurements/optimized_day3_adaptive.csv)  
-- [Day 4: BLE Optimization](measurements/optimized_day4.csv)
+#### Raw Data (Large Files)
+week5_summary.csv 
+Scenario,Current_mA
+Baseline_Active,6.9
+Optimized_UltraLow,0.576
+Optimized_Advertising,0.574
+Optimized_Notify,0.870
+Due to file size constraints, the full PPK (Power Profiler Kit) datasets are hosted externally:
+*   📂 [**Download Raw CSV Datasets (OneDrive)**](https://drive.google.com/drive/folders/1L-M3jfsjw1ZsduGurTWfnhF3VrrEKo4r)
+    *   *Includes: Day 3 Adaptive, Day 4 BLE Optimizations, and Baseline logs.*
  MCUboot OTA rollback integration
 # Week 6 — MCUboot + OTA + Automatic Rollback (nRF52840)
 
