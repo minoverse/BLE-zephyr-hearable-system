@@ -682,7 +682,7 @@ int main(void) {
 **Lesson:** BLE software link layer forbids synchronous logging
 ### BLE Auto-Adaptive Policy (RTT Log Proof)
 
-![BLE Adaptive Policy](docs/ble_adaptive_policy_enabled.png)
+![BLE Adaptive Policy](docs/20260228_120320.jpg)
 
 ##  Challenges & Solutions
 
