@@ -1,0 +1,9 @@
+Operation,Current_uA,Duration_s,Energy_uAh,Notes
+MCUboot_init,879,3,0.73,Measured on hardware (PPK2)
+BLE_stack_init,5500,1.2,1.83,Estimated from nRF52840 datasheet
+OTA_upload_5KB_s,5000,19.5,27.08,97.58KB / 5KB/s at 5mA TX
+OTA_flash_write,4200,8.0,9.33,Flash write @ 4.2mA typical
+Image_validation,2100,0.5,0.29,Hash verify + signature check
+MCUboot_swap,3500,2.0,1.94,Slot swap operation
+Reboot_confirm,879,3,0.73,Post-OTA reboot (matches measurement)
+Total_OTA_cost,,,41.93,Full OTA cycle end-to-end
