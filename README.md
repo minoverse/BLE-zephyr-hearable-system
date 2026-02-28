@@ -680,6 +680,9 @@ int main(void) {
 **Error:** `static assertion failed: Immediate logging not supported with software Link Layer`  
 **Fix:** `CONFIG_LOG_MODE_DEFERRED=y`  
 **Lesson:** BLE software link layer forbids synchronous logging
+### BLE Auto-Adaptive Policy (RTT Log Proof)
+
+![BLE Adaptive Policy](docs/ble_adaptive_policy_enabled.png)
 
 ##  Challenges & Solutions
 
