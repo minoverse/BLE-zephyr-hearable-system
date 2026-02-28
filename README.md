@@ -625,6 +625,61 @@ int main(void) {
 **Result:** ✅ USAGE FAULT triggered as expected
 
 ---
+## Extension 4B: Power Profiling & BLE Optimization
+
+### DWT Cycle Counter
+- Gesture detection latency: **0-9µs** measured via ARM DWT hardware counter (64MHz)
+- Implementation: `src/dwt_profiler.c`
+
+### BLE Auto-Adaptive Policy
+- Automatically adjusts connection interval based on TX rate
+- LOW_LATENCY (10ms) → BALANCED (50ms) → POWER_SAVE (100ms)
+- Implementation: `src/ble_adaptive.c`
+
+### OTA Energy Cost
+- Full OTA cycle: **~42µAh** (analytically derived from 879µA measured baseline)
+- MCUboot idle current: **879µA** (PPK2-verified)
+- Phases: MCUboot(879µA) → BLE upload(5mA) → Flash write(4.2mA) → Reboot(879µA)
+
+### Power Model Validation
+- Predicted: 2.17mA / Measured: 2.39mA / Error: **9%**
+- State machine model (mutually exclusive BLE states)
+
+### Crashes Fixed
+- `ASSERTION FAIL sem.c:136` → `CONFIG_RTT_CONSOLE=n` (double RTT init)
+- App silent after MCUboot → J-Link RTT address mismatch fixed via search range
+- `LOG_MODE_IMMEDIATE` rejected by BLE stack → switched to deferred mode
+
+## Debugging Journey: Crashes & Root Causes
+
+### Bug 1: ASSERTION FAIL @ kernel/sem.c:136
+**Symptom:** Kernel panic on boot, crash in ISR context  
+**Root Cause:** `CONFIG_LOG_MODE_IMMEDIATE=y` + `CONFIG_LOG_BACKEND_RTT_MODE_BLOCK=y` — LOG_INF() inside k_timer callback calls k_mutex_lock(K_FOREVER) in ISR context → assertion fail  
+**Fix:** Removed both configs, switched to deferred logging  
+**Lesson:** Never use LOG_MODE_IMMEDIATE with BLE stack or timer callbacks
+
+### Bug 2: App Silent After MCUboot
+**Symptom:** MCUboot shows "Jumping to first image slot" then complete silence  
+**Root Cause:** `CONFIG_RTT_CONSOLE=y` + `CONFIG_LOG_BACKEND_RTT=y` = double RTT init → semaphore corruption at boot  
+**Fix:** `CONFIG_RTT_CONSOLE=n`  
+**Lesson:** RTT console and RTT log backend are mutually exclusive
+
+### Bug 3: J-Link RTT Shows Nothing After MCUboot
+**Symptom:** MCUboot logs visible, app logs invisible in RTT Viewer  
+**Root Cause:** MCUboot RTT control block at RAM address A, app RTT CB at address B — J-Link caches A and never rescans  
+**Fix:** Set J-Link RTT search range to `0x20000000, size 0x40000` + `CONFIG_SEGGER_RTT_SECTION_NONE=y`  
+**Lesson:** RTT CB address changes between MCUboot and app images
+
+### Bug 4: mcumgr Upload Stuck at 0B
+**Symptom:** `0 B / 143.02 KiB` — upload never progressed  
+**Root Cause:** High-frequency sensor logging flooded UART, corrupting SMP framing  
+**Fix:** Disabled UART console during OTA, used nRF Device Manager instead  
+**Lesson:** Disable all logging before mcumgr UART upload
+
+### Bug 5: LOG_MODE_IMMEDIATE Rejected by BLE Stack
+**Error:** `static assertion failed: Immediate logging not supported with software Link Layer`  
+**Fix:** `CONFIG_LOG_MODE_DEFERRED=y`  
+**Lesson:** BLE software link layer forbids synchronous logging
 
 ##  Challenges & Solutions
 
