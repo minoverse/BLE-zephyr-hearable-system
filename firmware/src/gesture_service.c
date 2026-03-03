@@ -122,6 +122,25 @@ static void ble_notify_work_handler(struct k_work *work)
 static const struct bt_le_conn_param slow_params =
 	BT_LE_CONN_PARAM_INIT(CONN_INTERVAL_MIN, CONN_INTERVAL_MAX, 0, 400);
 
+/* bt_conn_ref keeps the object alive until the work handler runs. */
+static struct bt_conn *pending_conn;
+static struct k_work conn_param_work;
+
+static void conn_param_work_handler(struct k_work *work)
+{
+	ARG_UNUSED(work);
+	struct bt_conn *conn = pending_conn;
+	if (!conn) {
+		return;
+	}
+	int ret = bt_conn_le_param_update(conn, &slow_params);
+	if (ret) {
+		LOG_WRN("conn param update request failed: %d", ret);
+	}
+	bt_conn_unref(conn);
+	pending_conn = NULL;
+}
+
 static void on_connected(struct bt_conn *conn, uint8_t err)
 {
 	if (err) {
@@ -130,10 +149,13 @@ static void on_connected(struct bt_conn *conn, uint8_t err)
 	}
 	LOG_INF("Connected — requesting slow conn interval (%d–%d * 1.25ms)",
 		CONN_INTERVAL_MIN, CONN_INTERVAL_MAX);
-	int ret = bt_conn_le_param_update(conn, &slow_params);
-	if (ret) {
-		LOG_WRN("conn param update request failed: %d", ret);
+	/* Defer bt_conn_le_param_update() — must not run from BT RX thread context.
+	 * Drop any previous pending ref before overwriting (rapid reconnect guard). */
+	if (pending_conn) {
+		bt_conn_unref(pending_conn);
 	}
+	pending_conn = bt_conn_ref(conn);
+	k_work_submit(&conn_param_work);
 }
 
 static void on_disconnected(struct bt_conn *conn, uint8_t reason)
@@ -154,6 +176,8 @@ void ble_gesture_bind_queue(struct k_msgq *gesture_q)
 
 int ble_gesture_init(void)
 {
+	k_work_init(&conn_param_work, conn_param_work_handler);
+
 	int err = bt_enable(NULL);
 	if (err) {
 		LOG_ERR("bt_enable failed: %d", err);

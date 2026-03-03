@@ -45,9 +45,6 @@ void adaptive_set_mode(power_mode_t mode)
 {
     if (mode != current_mode) {
         current_mode = mode;
-        LOG_INF("Power mode: %s (%ums)",
-                mode_config[mode].name,
-                mode_config[mode].sampling_interval_ms);
     }
 }
 
@@ -60,3 +57,5 @@ uint32_t adaptive_get_odr_hz(void)
 {
     return mode_config[current_mode].odr_hz;
 }
+
+

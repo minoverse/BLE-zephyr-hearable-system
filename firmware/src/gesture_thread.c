@@ -18,7 +18,7 @@ static struct gesture_cfg gcfg;
 
 #define IMU_STACK_SIZE      2048
 #define IMU_THREAD_PRIO     7
-#define GESTURE_STACK_SIZE  1024
+#define GESTURE_STACK_SIZE  2048  /* needs room for I2C (sensor_attr_set) + LOG formatting */
 #define GESTURE_THREAD_PRIO 8
 
 K_THREAD_STACK_DEFINE(imu_stack, IMU_STACK_SIZE);

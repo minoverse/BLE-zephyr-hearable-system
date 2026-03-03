@@ -22,7 +22,7 @@ target_sources(app PRIVATE
 )
 
 if(CONFIG_BT)
-  target_sources(app PRIVATE src/gesture_service.c)
+  target_sources(app PRIVATE src/gesture_service.c src/ble_adaptive.c src/network_stress.c)
 endif()
 
 # 4. Pass versions to C code

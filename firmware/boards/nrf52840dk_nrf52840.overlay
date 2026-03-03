@@ -26,6 +26,17 @@
     cpu-power-states = <&suspend_to_idle>;
 };
 
+/*
+ * Disable the on-board QSPI NOR flash (MX25R6435F).
+ * The board BSP enables it by default, but this app does not use it.
+ * Without this, pm_resume_devices() is called from ISR context
+ * (_isr_wrapper → pm_system_resume) and qspi_nor_pm_action(RESUME)
+ * calls qspi_lock() → k_sem_take(K_FOREVER) → assertion in sem.c.
+ */
+&qspi {
+    status = "disabled";
+};
+
 &i2c0 {
     lsm6dso0: lsm6dso@6a {
         compatible = "st,lsm6dso";

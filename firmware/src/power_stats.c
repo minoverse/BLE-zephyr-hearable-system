@@ -15,13 +15,13 @@ static uint32_t pm_max_sleep_ms;
 static void on_pm_state_entry(enum pm_state state)
 {
     pm_entry_time_ms = k_uptime_get_32();
-    LOG_DBG("PM entry: state=%d", (int)state);
+    
 }
 
 static void on_pm_state_exit(enum pm_state state)
 {
     uint32_t dur = k_uptime_get_32() - pm_entry_time_ms;
-    LOG_DBG("PM exit: state=%d dur=%u ms", (int)state, dur);
+    
 
     pm_total_sleep_ms += dur;
     pm_sleep_count++;
