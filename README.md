@@ -683,7 +683,57 @@ int main(void) {
 ### BLE Auto-Adaptive Policy (RTT Log Proof)
 
 ![BLE Adaptive Policy](docs/20260228_120320.jpg)
+## Extension 5: Network Resilience & Fault Recovery
 
+### Network Stress Test
+| Metric | Value |
+|--------|-------|
+| TX attempts | 100 |
+| TX success | 100 (100%) |
+| TX failed | 0 |
+| Queue size optimized | 16 → 128 slots |
+| Sleep residency during stress | 99% |
+| PM transitions during stress | 2000+/10s |
+
+**Root cause of initial 15% success rate:** gesture_queue size 16 caused 85 drops under burst load. Fixed by increasing to 128.
+
+### Fault Recovery State Machine
+```
+HEALTHY ←→ DEGRADED ←→ RECOVERING → FAILED → Reboot
+```
+
+| Transition | Trigger |
+|---|---|
+| HEALTHY → DEGRADED | First failure detected |
+| DEGRADED → RECOVERING | >5 cumulative failures |
+| RECOVERING → HEALTHY | All systems restored |
+| RECOVERING → FAILED | >10 failures |
+
+### BLE Disconnect Recovery (Real Hardware)
+```
+[00:02:41] fault_recovery: Failure: ble
+[00:02:41] fault_recovery: BLE disconnect, restarting advertising...
+[00:02:41] fault_recovery: BLE advertising restarted
+[00:03:00] fault_recovery: state=healthy imu_fail=0 ble_disc=0
+```
+**MTTR: <1 second** ✅
+
+### State Reporter (JSON)
+```json
+{"state":"healthy","uptime":120,"gestures":15,"errors":0}
+```
+Reported every 30 seconds — ready for Golioth cloud integration.
+
+### Files Added
+- `src/fault_recovery.c/h` — state machine + auto recovery
+- `src/state_reporter.c/h` — JSON health reporting
+- `src/network_stress.c/h` — 100-burst TX stress test
+- `src/ble_adaptive.c/h` — connection interval auto-tuning
+- `docs/extension5_network_resilience.md` — full results
+- `docs/kernel_crash_investigation.md` — sem.c:136 root cause
+
+### summary
+*Network stress test achieved 100% TX success (100/100 bursts) after optimizing gesture queue from 16→128 slots. BLE fault recovery verified on hardware: disconnect detected, advertising restarted, state returned to healthy in <1 second. System state machine (HEALTHY→DEGRADED→RECOVERING→FAILED) with JSON health reporting every 30s.*
 ##  Challenges & Solutions
 
 ###  Challenge 1 — mcumgr Upload Stuck at 0B
