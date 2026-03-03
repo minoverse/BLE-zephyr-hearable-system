@@ -1,4 +1,5 @@
 #include "imu.h"
+#include "fault_recovery.h"
 #include <zephyr/drivers/sensor.h>
 #include <zephyr/logging/log.h>
 

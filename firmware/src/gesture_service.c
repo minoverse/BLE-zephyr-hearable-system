@@ -5,6 +5,7 @@
  */
 
 #include "gesture_service.h"
+#include "fault_recovery.h"
 #include "app_types.h"
 
 #include <zephyr/kernel.h>
@@ -160,6 +161,7 @@ static void on_connected(struct bt_conn *conn, uint8_t err)
 
 static void on_disconnected(struct bt_conn *conn, uint8_t reason)
 {
+	fault_recovery_report_failure("ble");
 	LOG_INF("Disconnected (reason 0x%02x)", reason);
 }
 

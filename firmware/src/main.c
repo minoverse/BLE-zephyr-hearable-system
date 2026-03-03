@@ -7,6 +7,7 @@
 #include "gesture_service.h"
 #include "ble_adaptive.h"
 #include "network_stress.h"
+#include "fault_recovery.h"
 #endif
 
 LOG_MODULE_REGISTER(main, LOG_LEVEL_INF);
@@ -28,6 +29,7 @@ int main(void)
     LOG_INF("Boot: BLE Hearable (IMU->Gesture->BLE)");
 
     power_stats_init();
+	fault_recovery_init();
 
     int ret = gesture_threads_start(&sample_queue, &gesture_queue);
     if (ret) {
