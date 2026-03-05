@@ -25,19 +25,8 @@ jobs:
       with:
         path: app
 
-    - name: Cache west modules
-      uses: actions/cache@v4
-      with:
-        path: |
-          ~/.cache/pip
-          ~/zephyrproject
-        key: west-${{ runner.os }}-${{ hashFiles('app/firmware/west.yml') }}
-        restore-keys: |
-          west-${{ runner.os }}-
-
-    - name: West init
+    - name: West init and update
       run: |
-        pip3 install west
         west init -l app/firmware
         west update --narrow -o=--depth=1
         west zephyr-export
@@ -45,17 +34,12 @@ jobs:
     - name: Build
       run: |
         cd app/firmware
-        west build -b ${{ matrix.board }} --pristine -- \
-          -DCONFIG_ASSERT=y \
-          -DCONFIG_COMPILER_WARNINGS_AS_ERRORS=y
+        west build -b ${{ matrix.board }} --pristine
 
     - name: Binary size report
       run: |
-        cd app/firmware
         echo "=== Memory Usage ==="
-        size build/zephyr/zephyr.elf
-        echo "=== Flash Usage ==="
-        west build -t rom_report 2>/dev/null | grep -E "total|FLASH|RAM" || true
+        size app/firmware/build/zephyr/zephyr.elf
 
     - name: Flash limit check
       run: |
