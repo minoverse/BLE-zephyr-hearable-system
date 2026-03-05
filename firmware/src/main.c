@@ -7,6 +7,8 @@
 #include "gesture_service.h"
 #include "ble_adaptive.h"
 #include "network_stress.h"
+#include <zephyr/dfu/mcuboot.h>
+#include <hal/nrf_power.h>
 #include "fault_recovery.h"
 #endif
 
@@ -26,10 +28,27 @@ int main(void)
             APP_VERSION_MINOR,
             APP_VERSION_PATCH);
     LOG_INF("========================================");
-    LOG_INF("Boot: BLE Hearable (IMU->Gesture->BLE)");
+    uint32_t _boot_ms = k_cyc_to_ms_near32(k_cycle_get_32());
+	LOG_INF("Boot time: %u ms", _boot_ms);
+	/* Reset reason from POWER register */
+	uint32_t resetreas = NRF_POWER->RESETREAS;
+	NRF_POWER->RESETREAS = 0xFFFFFFFF;
+	if (resetreas & 0x01) LOG_INF("Reset reason: PIN (reset button)");
+	if (resetreas & 0x02) LOG_INF("Reset reason: Watchdog");
+	if (resetreas & 0x04) LOG_INF("Reset reason: SREQ (soft reset)");
+	if (resetreas & 0x08) LOG_INF("Reset reason: LOCKUP (HardFault)");
+	if (resetreas == 0)   LOG_INF("Reset reason: Power-on reset");
+	LOG_INF("Boot: BLE Hearable (IMU->Gesture->BLE)");
 
     power_stats_init();
 	fault_recovery_init();
+	if (boot_is_img_confirmed() == 0) {
+		int rc = boot_write_img_confirmed();
+		if (rc == 0) LOG_INF("OTA: image confirmed");
+		else LOG_ERR("OTA: confirm failed: %d", rc);
+	} else {
+		LOG_INF("OTA: image already confirmed");
+	}
 
     int ret = gesture_threads_start(&sample_queue, &gesture_queue);
     if (ret) {

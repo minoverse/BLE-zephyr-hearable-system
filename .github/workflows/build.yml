@@ -1,0 +1,77 @@
+name: Firmware CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build:
+    name: Build (${{ matrix.board }})
+    runs-on: ubuntu-22.04
+    container:
+      image: ghcr.io/zephyrproject-rtos/ci:v0.26.14
+
+    strategy:
+      fail-fast: false
+      matrix:
+        board:
+          - nrf52840dk/nrf52840
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v3
+      with:
+        path: app
+
+    - name: Cache west modules
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.cache/pip
+          ~/zephyrproject
+        key: west-${{ runner.os }}-${{ hashFiles('app/firmware/west.yml') }}
+        restore-keys: |
+          west-${{ runner.os }}-
+
+    - name: West init
+      run: |
+        pip3 install west
+        west init -l app/firmware
+        west update --narrow -o=--depth=1
+        west zephyr-export
+
+    - name: Build
+      run: |
+        cd app/firmware
+        west build -b ${{ matrix.board }} --pristine -- \
+          -DCONFIG_ASSERT=y \
+          -DCONFIG_COMPILER_WARNINGS_AS_ERRORS=y
+
+    - name: Binary size report
+      run: |
+        cd app/firmware
+        echo "=== Memory Usage ==="
+        size build/zephyr/zephyr.elf
+        echo "=== Flash Usage ==="
+        west build -t rom_report 2>/dev/null | grep -E "total|FLASH|RAM" || true
+
+    - name: Flash limit check
+      run: |
+        FLASH_USED=$(size app/firmware/build/zephyr/zephyr.elf | awk 'NR==2{print $1+$2}')
+        FLASH_LIMIT=450000
+        echo "Flash used: $FLASH_USED / $FLASH_LIMIT bytes"
+        if [ "$FLASH_USED" -gt "$FLASH_LIMIT" ]; then
+          echo "ERROR: Flash limit exceeded!"
+          exit 1
+        fi
+
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v3
+      with:
+        name: firmware-${{ matrix.board }}-${{ github.sha }}
+        path: |
+          app/firmware/build/zephyr/zephyr.elf
+          app/firmware/build/zephyr/zephyr.hex
+        retention-days: 30
