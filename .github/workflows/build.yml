@@ -6,13 +6,13 @@ on:
   pull_request:
     branches: [ main ]
 
+permissions:
+  contents: read
+
 jobs:
   build:
     name: Build (${{ matrix.board }})
     runs-on: ubuntu-22.04
-    container:
-      image: ghcr.io/zephyrproject-rtos/ci:v0.26.14
-
     strategy:
       fail-fast: false
       matrix:
@@ -23,28 +23,33 @@ jobs:
     - name: Checkout
       uses: actions/checkout@v4
       with:
-        path: app
+        path: ble-hearable
+        persist-credentials: false
 
-    - name: West init and update
-      working-directory: app
-      run: |
-        west init -l firmware
-        west update --narrow -o=--depth=1
-        west zephyr-export
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: 3.12
 
-    - name: Build
-      working-directory: app/firmware
+    - name: Setup Zephyr project
+      uses: zephyrproject-rtos/action-zephyr-setup@v1
+      with:
+        app-path: ble-hearable/firmware
+        toolchains: arm-zephyr-eabi
+
+    - name: Build firmware
+      working-directory: ble-hearable/firmware
       run: |
         west build -b ${{ matrix.board }} --pristine
 
     - name: Binary size report
-      working-directory: app/firmware
+      working-directory: ble-hearable/firmware
       run: |
         echo "=== Memory Usage ==="
         size build/zephyr/zephyr.elf
 
     - name: Flash limit check
-      working-directory: app/firmware
+      working-directory: ble-hearable/firmware
       run: |
         FLASH_USED=$(size build/zephyr/zephyr.elf | awk 'NR==2{print $1+$2}')
         FLASH_LIMIT=450000
@@ -59,6 +64,6 @@ jobs:
       with:
         name: firmware-${{ matrix.board }}-${{ github.sha }}
         path: |
-          app/firmware/build/zephyr/zephyr.elf
-          app/firmware/build/zephyr/zephyr.hex
+          ble-hearable/firmware/build/zephyr/zephyr.elf
+          ble-hearable/firmware/build/zephyr/zephyr.hex
         retention-days: 30
