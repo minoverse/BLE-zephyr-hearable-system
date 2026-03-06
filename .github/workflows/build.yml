@@ -62,7 +62,7 @@ jobs:
     - name: Upload artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: firmware-${{ matrix.board }}-${{ github.sha }}
+        name: firmware-nrf52840dk-${{ github.sha }}
         path: |
           ble-hearable/firmware/build/zephyr/zephyr.elf
           ble-hearable/firmware/build/zephyr/zephyr.hex
