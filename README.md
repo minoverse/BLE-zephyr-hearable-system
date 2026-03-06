@@ -1,3 +1,5 @@
+![Firmware CI](https://github.com/minoverse/BLE-zephyr-hearable-system/actions/workflows/build.yml/badge.svg)
+
 # BLE-zephyr-hearable-system
 
 Zephyr RTOS–based BLE hearable system using **nRF52840**.  
