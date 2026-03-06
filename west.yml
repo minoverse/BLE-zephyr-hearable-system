@@ -1,0 +1,8 @@
+manifest:
+  projects:
+    - name: zephyr
+      url: https://github.com/zephyrproject-rtos/zephyr
+      revision: v4.3.0
+      import: true
+  self:
+    path: ble-hearable
