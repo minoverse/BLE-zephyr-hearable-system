@@ -28,8 +28,8 @@ jobs:
     - name: West init and update
       run: |
         west init -l app/firmware
-        west update --narrow -o=--depth=1
-        west zephyr-export
+        cd app && west update --narrow -o=--depth=1
+        cd app && west zephyr-export
 
     - name: Build
       run: |
