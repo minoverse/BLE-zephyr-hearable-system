@@ -19,10 +19,11 @@ target_sources(app PRIVATE
   src/gesture_thread.c
   src/adaptive_power.c
   src/power_stats.c
+  src/watchdog.c
 )
 
 if(CONFIG_BT)
-  target_sources(app PRIVATE src/gesture_service.c src/fault_recovery.c src/ble_adaptive.c src/network_stress.c)
+  target_sources(app PRIVATE src/gesture_service.c src/fault_recovery.c src/ble_adaptive.c src/network_stress.c src/state_reporter.c)
 endif()
 
 # 4. Pass versions to C code
