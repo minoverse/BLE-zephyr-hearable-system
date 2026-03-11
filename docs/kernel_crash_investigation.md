@@ -85,6 +85,6 @@ CPU sleep works through CONFIG_PM alone. Device PM not needed.
 > Any driver whose resume callback performs I2C/SPI will call k_sem_take(K_FOREVER) → assertion.
 > Solution: CONFIG_PM_DEVICE=n — CPU sleep is independent of device PM.
 
-## Interview Answer
+## Summary
 
 *"The kernel panic was caused by pm_resume_devices() being called from ISR context via Zephyr's _isr_wrapper. The nRF52840dk BSP enables QSPI flash by default, and its PM resume callback calls k_sem_take(K_FOREVER) — illegal from interrupt context. The fix was CONFIG_PM_DEVICE=n: CPU suspend-to-idle works through CONFIG_PM alone without device PM hooks."*
