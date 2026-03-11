@@ -240,11 +240,11 @@ Level 1: Active processing
 
 ---
 
-### Interview Answer 
+### Power Consumption & Validation
 
-**Q: "Your PM sleep count was 0. Doesn't that mean it failed?"**
+**Q: Your PM sleep count was 0. Doesn't that mean it failed?**
 
-**A:** "No. Here's why:
+**A:** No. Here's why:
 
 1. **Goal was power reduction**, not PM metrics
    - Achieved: 6.9mA → 0.576mA (87% reduction)
@@ -262,7 +262,7 @@ Level 1: Active processing
    - Real products measure current, not PM counts
    - PPK2 measurement is the ground truth
 
-**Bottom line:** Optimization succeeded. PM count was a measurement method that didn't work, so I validated with a better one."
+**Bottom line:** Optimization succeeded. PM count was a measurement method that didn't work, so I validated with a better one.
 
 ---
 
@@ -329,7 +329,7 @@ Priority: P3 (nice-to-have)
 - Reliable: Reproducible across multiple tests ✅  
 - Sufficient: Proves optimization effectiveness ✅
 
-> "Good engineers solve problems. Great engineers know when a problem isn't worth solving."
+
 
 ---
 
