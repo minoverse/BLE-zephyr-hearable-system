@@ -15,7 +15,7 @@ IMU-based gesture detection with a custom BLE GATT service, low-power design, an
 - State-based gesture detection (LEFT / RIGHT / NOD) with debounce ✅
 - Gesture stability verified via serial logs ✅
 - BLE GATT service (custom 128-bit UUID + Notify worker + CCC) ✅
-- OTA / MCUboot rollback ⏳
+- OTA / MCUboot rollback 
 
 >  Development is temporarily blocked due to a **WSL2 environment failure**  
 > (see *Known Issues* section below).
@@ -589,7 +589,7 @@ Implement **MCUboot bootloader** with **OTA firmware update capability** and **a
 
 ---
 
-## ⚙️ Implementation Steps
+##  Implementation Steps
 
 ### 1️⃣ MCUboot Installation
 - Built and flashed **MCUboot v2.2.0** bootloader
@@ -857,18 +857,18 @@ I: Starting swap using offset   ← Reverting to v1.0.0
         I: Image version: v1.0.0
                I: Jumping to the first image slot this log agian MCUboot OK
   "Jumping to slot" OK
-  → 그 후 침묵
-  = App main() 도달 전 crash waht  do oyuthink reason?
+  → Silent
+  = Before arrive App main()  crash.
 
-● Classic pattern — MCUboot OK but app crashes before main() means the crash is in Zephyr's early init sequence, not in your application code. Let me look at the relevant files.
+● Classic pattern — MCUboot OK but app crashes before main() means the crash is in Zephyr's early init sequence, not in  application code. I looked at the relevant files.
 
 ● Recalled 1 memory, searched for 1 pattern, read 4 files (ctrl+o to expand)
 
-● Let me check the overlay and IMU config too.
+● I checked the overlay and IMU config too.
 
 ● Read 2 files (ctrl+o to expand)
 
-● Now I have the full picture. Here are the ranked suspects:
+●  Here are the ranked suspects:
 
   ---
   1. Deferred logging + early crash (most likely)
@@ -900,14 +900,14 @@ I: Starting swap using offset   ← Reverting to v1.0.0
 
   The fault dump (CONFIG_FAULT_DUMP=2) output appears in the RTT buffer for only a few ms. If J-Link RTT Viewer connects after the crash, the circular buffer has already overwritten it.
 
-  Fix: ensure RTT Viewer is already connected before you power/reset the board. Or:
+  Fix: ensure RTT Viewer is already connected before i power/reset the board. Or:
   CONFIG_LOG_BACKEND_RTT_MODE_BLOCK=y
   This stalls the CPU until the host reads the buffer — nothing is lost.
 
   ---
   4. CONFIG_BOOT_BANNER check
 
-  Add this to prj.conf to confirm how far Zephyr gets before your code:
+  Add this to prj.conf to confirm how far Zephyr gets before code:
   CONFIG_BOOT_BANNER=y
   If *** Booting Zephyr OS build ... never appears → crash is in z_cstart() or device init level 0.
   If it appears but nothing else → crash is in a later SYS_INIT or device init.
@@ -921,7 +921,7 @@ I: Starting swap using offset   ← Reverting to v1.0.0
   CONFIG_BOOT_BANNER=y                # Zephyr's own early marker
   CONFIG_LSM6DSO_TRIGGER_NONE=y       # isolate IMU trigger thread
 
-  Rebuild, flash, connect RTT Viewer before reset, then reset. You should see either:
+  Rebuild, flash, connect RTT Viewer before reset, then reset. I should see either:
   - The boot banner + IMU error (safe, graceful) — then remove TRIGGER_NONE
   - No boot banner at all → PM/PM_DEVICE subsystem crash in z_cstart
 
